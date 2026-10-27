@@ -44,6 +44,7 @@ var (
 	scope             string
 	labelPrecedence   bool
 	checkConcurrency  int
+	rollbackOnFailure bool
 )
 
 var rootCmd = NewRootCommand()
@@ -102,6 +103,7 @@ func PreRun(cmd *cobra.Command, _ []string) {
 	scope, _ = f.GetString("scope")
 	labelPrecedence, _ = f.GetBool("label-take-precedence")
 	checkConcurrency, _ = f.GetInt("check-concurrency")
+	rollbackOnFailure, _ = f.GetBool("rollback-on-failure")
 
 	if scope != "" {
 		log.Debugf(`Using scope %q`, scope)
@@ -423,7 +425,8 @@ func runUpdatesWithNotifications(ctx context.Context, filter t.Filter) *metrics.
 		LabelPrecedence: labelPrecedence,
 		NoPull:          noPull,
 
-		CheckConcurrency: checkConcurrency,
+		CheckConcurrency:  checkConcurrency,
+		RollbackOnFailure: rollbackOnFailure,
 	}
 	result, err := actions.Update(ctx, client, updateParams)
 	if err != nil {

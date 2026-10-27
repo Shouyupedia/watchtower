@@ -22,6 +22,12 @@ type TestData struct {
 	NameOfContainerToKeep   string
 	Containers              []t.Container
 	Staleness               map[string]bool
+	// FailStart makes StartContainer fail for the containers with these names
+	FailStart map[string]bool
+	// FailRollback makes RollbackContainer fail for the containers with these names
+	FailRollback map[string]bool
+	// RolledBack collects the names of the containers that were rolled back
+	RolledBack []string
 }
 
 // TriedToRemoveImage is a test helper function to check whether RemoveImageByID has been called
@@ -52,7 +58,19 @@ func (client MockClient) StopContainer(_ context.Context, c t.Container, _ time.
 }
 
 // StartContainer is a mock method
-func (client MockClient) StartContainer(_ context.Context, _ t.Container) (t.ContainerID, error) {
+func (client MockClient) StartContainer(_ context.Context, c t.Container) (t.ContainerID, error) {
+	if client.TestData.FailStart[c.Name()] {
+		return "", errors.New("failed to start the container")
+	}
+	return "", nil
+}
+
+// RollbackContainer is a mock method that records the rollback
+func (client MockClient) RollbackContainer(_ context.Context, c t.Container) (t.ContainerID, error) {
+	if client.TestData.FailRollback[c.Name()] {
+		return "", errors.New("failed to recreate the container")
+	}
+	client.TestData.RolledBack = append(client.TestData.RolledBack, c.Name())
 	return "", nil
 }
 

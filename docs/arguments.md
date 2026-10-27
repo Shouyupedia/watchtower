@@ -474,6 +474,18 @@ Environment Variable: WATCHTOWER_REGISTRY_TLS_SKIP_VERIFY
              Default: false
 ```
 
+## Rollback on failure
+If a container cannot be started with the new image, recreate it from the image it used before, so that the service comes back instead of staying down. The container is still reported as failed, together with the outcome of the rollback. The previous image is kept (not cleaned up) for containers that failed. The watchtower container itself is not rolled back, as the old instance keeps running if the new one fails to start.
+
+A container that starts but then fails on its own (for example by crashing right away) is not detected.
+
+```text
+            Argument: --rollback-on-failure
+Environment Variable: WATCHTOWER_ROLLBACK_ON_FAILURE
+                Type: Boolean
+             Default: false
+```
+
 ## Check concurrency
 Number of containers that are checked for new images at the same time. Containers that share an image only cause the image to be pulled once. Use `1` to check one container at a time, e.g. if your registry rate limits you.
 

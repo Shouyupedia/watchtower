@@ -51,6 +51,7 @@ type Client interface {
 	GetContainer(ctx context.Context, containerID t.ContainerID) (t.Container, error)
 	StopContainer(context.Context, t.Container, time.Duration) error
 	StartContainer(context.Context, t.Container) (t.ContainerID, error)
+	RollbackContainer(context.Context, t.Container) (t.ContainerID, error)
 	RenameContainer(context.Context, t.Container, string) error
 	IsContainerStale(context.Context, t.Container, t.UpdateParams) (stale bool, latestImage t.ImageID, err error)
 	ExecuteCommand(ctx context.Context, containerID t.ContainerID, command string, timeout int) (SkipUpdate bool, err error)
@@ -349,7 +350,29 @@ func (client dockerClient) GetNetworkConfig(c t.Container) *network.NetworkingCo
 }
 
 func (client dockerClient) StartContainer(ctx context.Context, c t.Container) (t.ContainerID, error) {
+	return client.recreateContainer(ctx, c, "")
+}
+
+// RollbackContainer recreates the container from the image it was originally created from (rather than from whatever
+// its image name points to now). It is meant for when starting the container with the new image failed.
+func (client dockerClient) RollbackContainer(ctx context.Context, c t.Container) (t.ContainerID, error) {
+	previousImage := c.ContainerInfo().Image
+	if previousImage == "" {
+		return "", errors.New("the image the container was created from is not known")
+	}
+	return client.recreateContainer(ctx, c, previousImage)
+}
+
+// recreateContainer creates a container with the configuration of c and starts it if c was running. The image is
+// taken from the configuration of c unless imageOverride is set. A container that was created but could not be
+// completed is removed again, as it would otherwise keep the name from being used.
+func (client dockerClient) recreateContainer(ctx context.Context, c t.Container, imageOverride string) (t.ContainerID, error) {
 	config := c.GetCreateConfig()
+	if imageOverride != "" {
+		withImage := *config
+		withImage.Image = imageOverride
+		config = &withImage
+	}
 	hostConfig := c.GetCreateHostConfig()
 	networkConfig := client.GetNetworkConfig(c)
 
@@ -377,31 +400,55 @@ func (client dockerClient) StartContainer(ctx context.Context, c t.Container) (t
 		return "", err
 	}
 
+	if err := client.connectAndStart(opCtx, c, createdContainer, hostConfig, simpleNetworkConfig, networkConfig); err != nil {
+		client.discardContainer(ctx, name, createdContainer.ID)
+		return "", err
+	}
+
+	return t.ContainerID(createdContainer.ID), nil
+}
+
+func (client dockerClient) connectAndStart(
+	ctx context.Context,
+	c t.Container,
+	created container.CreateResponse,
+	hostConfig *container.HostConfig,
+	simpleNetworkConfig *network.NetworkingConfig,
+	networkConfig *network.NetworkingConfig,
+) error {
 	if !(hostConfig.NetworkMode.IsHost()) {
 
 		for k := range simpleNetworkConfig.EndpointsConfig {
-			err = client.api.NetworkDisconnect(opCtx, k, createdContainer.ID, true)
-			if err != nil {
-				return "", err
+			if err := client.api.NetworkDisconnect(ctx, k, created.ID, true); err != nil {
+				return err
 			}
 		}
 
 		for k, v := range networkConfig.EndpointsConfig {
-			err = client.api.NetworkConnect(opCtx, k, createdContainer.ID, v)
-			if err != nil {
-				return "", err
+			if err := client.api.NetworkConnect(ctx, k, created.ID, v); err != nil {
+				return err
 			}
 		}
 
 	}
 
-	createdContainerID := t.ContainerID(createdContainer.ID)
 	if !c.IsRunning() && !client.ReviveStopped {
-		return createdContainerID, nil
+		return nil
 	}
 
-	return createdContainerID, client.doStartContainer(opCtx, c, createdContainer)
+	return client.doStartContainer(ctx, c, created)
+}
 
+// discardContainer removes a container that was created but could not be set up
+func (client dockerClient) discardContainer(ctx context.Context, name, id string) {
+	ctx, cancel := callCtx(context.WithoutCancel(ctx))
+	defer cancel()
+
+	if err := client.api.ContainerRemove(ctx, id, container.RemoveOptions{Force: true}); err != nil {
+		log.WithError(err).Warnf("Could not remove the incomplete container %s (%s), it has to be removed manually", name, t.ContainerID(id).ShortID())
+		return
+	}
+	log.Debugf("Removed the incomplete container %s (%s)", name, t.ContainerID(id).ShortID())
 }
 
 func (client dockerClient) doStartContainer(ctx context.Context, c t.Container, creation container.CreateResponse) error {

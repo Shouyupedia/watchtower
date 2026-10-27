@@ -149,6 +149,11 @@ func RegisterSystemFlags(rootCmd *cobra.Command) {
 		envBool("WATCHTOWER_ROLLING_RESTART"),
 		"Restart containers one at a time")
 
+	flags.Bool(
+		"rollback-on-failure",
+		envBool("WATCHTOWER_ROLLBACK_ON_FAILURE"),
+		"Recreate a container from its previous image if it could not be started with the new one")
+
 	flags.Int(
 		"check-concurrency",
 		envInt("WATCHTOWER_CHECK_CONCURRENCY"),

@@ -3,6 +3,7 @@ package actions
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/shouyupedia/watchtower/internal/util"
@@ -250,6 +251,18 @@ func cleanupImages(ctx context.Context, client container.Client, imageIDs map[ty
 	}
 }
 
+// rollBack recreates a container that could not be started with its new image from the image it used before
+func rollBack(ctx context.Context, container types.Container, client container.Client, startErr error) error {
+	log.Warnf("Rolling %s back to its previous image", container.Name())
+	// A shutdown request must not leave the container half way through the rollback
+	if _, err := client.RollbackContainer(context.WithoutCancel(ctx), container); err != nil {
+		log.WithError(err).Errorf("Rollback of %s failed, it is not running", container.Name())
+		return fmt.Errorf("%w (rollback to the previous image failed too: %v)", startErr, err)
+	}
+	log.Infof("%s was restored with its previous image", container.Name())
+	return fmt.Errorf("%w (restored with the previous image)", startErr)
+}
+
 func restartStaleContainer(ctx context.Context, container types.Container, client container.Client, params types.UpdateParams) error {
 	// Since we can't shutdown a watchtower container immediately, we need to
 	// start the new one while the old one is still running. This prevents us
@@ -265,6 +278,9 @@ func restartStaleContainer(ctx context.Context, container types.Container, clien
 	if !params.NoRestart {
 		if newContainerID, err := client.StartContainer(ctx, container); err != nil {
 			log.Error(err)
+			if params.RollbackOnFailure && !container.IsWatchtower() {
+				return rollBack(ctx, container, client, err)
+			}
 			return err
 		} else if container.ToRestart() && params.LifecycleHooks {
 			lifecycle.ExecutePostUpdateCommand(ctx, client, newContainerID)

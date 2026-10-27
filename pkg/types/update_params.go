@@ -15,6 +15,8 @@ type UpdateParams struct {
 	LifecycleHooks  bool
 	RollingRestart  bool
 	LabelPrecedence bool
+	// RollbackOnFailure recreates a container from its previous image if it could not be started with the new one
+	RollbackOnFailure bool
 	// CheckConcurrency is the number of containers that are checked for new images in parallel (1 or less: one by one)
 	CheckConcurrency int
 }
