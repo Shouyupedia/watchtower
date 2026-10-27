@@ -4,10 +4,10 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"time"
 
-	"github.com/containrrr/watchtower/internal/util"
-	"github.com/containrrr/watchtower/pkg/container/mocks"
-	"github.com/containrrr/watchtower/pkg/filters"
-	t "github.com/containrrr/watchtower/pkg/types"
+	"github.com/shouyupedia/watchtower/internal/util"
+	"github.com/shouyupedia/watchtower/pkg/container/mocks"
+	"github.com/shouyupedia/watchtower/pkg/filters"
+	t "github.com/shouyupedia/watchtower/pkg/types"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/backend"

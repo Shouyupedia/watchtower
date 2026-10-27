@@ -1,6 +1,6 @@
-module github.com/containrrr/watchtower
+module github.com/shouyupedia/watchtower
 
-go 1.20
+go 1.24
 
 require (
 	github.com/containrrr/shoutrrr v0.8.0

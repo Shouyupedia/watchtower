@@ -1,0 +1,26 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - noctx
+    - gosec
+    - misspell
+  settings:
+    gosec:
+      excludes:
+        - G104
+        - G304   # file paths come from operator-supplied flags
+  exclusions:
+    paths:
+      - tplprev
+    rules:
+      - path: _test\.go
+        linters: [gosec, noctx, errcheck]
+formatters:
+  enable:
+    - gofmt

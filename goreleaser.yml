@@ -1,86 +1,105 @@
-build:
-  main: ./main.go
-  binary: watchtower
-  goos:
-    - linux
-    - windows
-  goarch:
-    - amd64
-    - 386
-    - arm
-    - arm64
-  ldflags:
-    - -s -w -X github.com/containrrr/watchtower/internal/meta.Version={{.Version}}
+version: 2
+
+project_name: watchtower
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: watchtower
+    main: ./main.go
+    binary: watchtower
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos:
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - "386"
+      - arm
+      - arm64
+    goarm:
+      - "6"
+    ldflags:
+      - -s -w -X github.com/shouyupedia/watchtower/internal/meta.Version={{ .Version }}
+
 archives:
-  - 
-    name_template: "{{.ProjectName}}_{{.Os}}_{{.Arch}}"
-    format: tar.gz
-    replacements:
-      arm: armhf
-      arm64: arm64v8
-      amd64: amd64
-      386: 386
-      darwin: macOS
-      linux: linux
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_{{ .Os }}_{{- if eq .Arch "arm" }}armhf{{ else if eq .Arch "arm64" }}arm64v8{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     files:
       - LICENSE.md
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    args:
+      - sign-blob
+      - --yes
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}
+    certificate: ${artifact}.pem
+
 dockers:
-  -
-    use_buildx: true
-    build_flag_templates: [ "--platform=linux/amd64" ]
+  - id: amd64
+    use: buildx
     goos: linux
     goarch: amd64
-    goarm: ''
     dockerfile: dockerfiles/Dockerfile
+    build_flag_templates: ["--platform=linux/amd64"]
     image_templates:
-      - containrrr/watchtower:amd64-{{ .Version }}
-      - containrrr/watchtower:amd64-latest
-      - ghcr.io/containrrr/watchtower:amd64-{{ .Version }}
-      - ghcr.io/containrrr/watchtower:amd64-latest
-    binaries:
-      - watchtower
-  - 
-    use_buildx: true
-    build_flag_templates: [ "--platform=linux/386" ]
+      - ghcr.io/shouyupedia/watchtower:{{ .Version }}-amd64
+  - id: i386
+    use: buildx
     goos: linux
-    goarch: 386
-    goarm: ''
+    goarch: "386"
     dockerfile: dockerfiles/Dockerfile
+    build_flag_templates: ["--platform=linux/386"]
     image_templates:
-      - containrrr/watchtower:i386-{{ .Version }}
-      - containrrr/watchtower:i386-latest
-      - ghcr.io/containrrr/watchtower:i386-{{ .Version }}
-      - ghcr.io/containrrr/watchtower:i386-latest
-    binaries:
-      - watchtower
-  - 
-    use_buildx: true
-    build_flag_templates: [ "--platform=linux/arm/v6" ]
+      - ghcr.io/shouyupedia/watchtower:{{ .Version }}-i386
+  - id: armhf
+    use: buildx
     goos: linux
     goarch: arm
-    goarm: 6
+    goarm: "6"
     dockerfile: dockerfiles/Dockerfile
+    build_flag_templates: ["--platform=linux/arm/v6"]
     image_templates:
-      - containrrr/watchtower:armhf-{{ .Version }}
-      - containrrr/watchtower:armhf-latest
-      - ghcr.io/containrrr/watchtower:armhf-{{ .Version }}
-      - ghcr.io/containrrr/watchtower:armhf-latest
-    binaries:
-      - watchtower
-  - 
-    use_buildx: true
-    build_flag_templates: [ "--platform=linux/arm64/v8" ]
+      - ghcr.io/shouyupedia/watchtower:{{ .Version }}-armhf
+  - id: arm64v8
+    use: buildx
     goos: linux
     goarch: arm64
-    goarm: ''
     dockerfile: dockerfiles/Dockerfile
+    build_flag_templates: ["--platform=linux/arm64/v8"]
     image_templates:
-      - containrrr/watchtower:arm64v8-{{ .Version }}
-      - containrrr/watchtower:arm64v8-latest
-      - ghcr.io/containrrr/watchtower:arm64v8-{{ .Version }}
-      - ghcr.io/containrrr/watchtower:arm64v8-latest
-    binaries:
-      - watchtower
+      - ghcr.io/shouyupedia/watchtower:{{ .Version }}-arm64v8
+
+docker_manifests:
+  - name_template: ghcr.io/shouyupedia/watchtower:{{ .Version }}
+    image_templates:
+      - ghcr.io/shouyupedia/watchtower:{{ .Version }}-amd64
+      - ghcr.io/shouyupedia/watchtower:{{ .Version }}-i386
+      - ghcr.io/shouyupedia/watchtower:{{ .Version }}-armhf
+      - ghcr.io/shouyupedia/watchtower:{{ .Version }}-arm64v8
+  - name_template: ghcr.io/shouyupedia/watchtower:latest
+    image_templates:
+      - ghcr.io/shouyupedia/watchtower:{{ .Version }}-amd64
+      - ghcr.io/shouyupedia/watchtower:{{ .Version }}-i386
+      - ghcr.io/shouyupedia/watchtower:{{ .Version }}-armhf
+      - ghcr.io/shouyupedia/watchtower:{{ .Version }}-arm64v8

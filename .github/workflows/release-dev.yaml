@@ -6,31 +6,40 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: 1.20.x
+          go-version-file: go.mod
       - name: Build
         run: ./build.sh
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          go-version: 1.20.x
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
       - name: Test
-        run: go test -v -coverprofile coverage.out -covermode atomic ./... 
+        run: go test -v -race -coverprofile coverage.out -covermode atomic ./...
       - name: Publish coverage
-        uses: codecov/codecov-action@v3
+        if: ${{ env.CODECOV_TOKEN != '' }}
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
   publish:
@@ -38,22 +47,28 @@ jobs:
       - build
       - test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Publish to Docker Hub
-        uses: jerray/publish-docker-action@87d84711629b0dc9f6bb127b568413cc92a2088e #master@2022-10-14
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-          file: dockerfiles/Dockerfile.self-contained
-          repository: containrrr/watchtower
-          tags: latest-dev
-      - name: Publish to GHCR
-        uses: jerray/publish-docker-action@87d84711629b0dc9f6bb127b568413cc92a2088e #master@2022-10-14
+          persist-credentials: false
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
-          username: ${{ secrets.BOT_USERNAME }}
-          password: ${{ secrets.BOT_GHCR_PAT }}
-          file: dockerfiles/Dockerfile.self-contained
           registry: ghcr.io
-          repository: containrrr/watchtower
-          tags: latest-dev
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push latest-dev
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: dockerfiles/Dockerfile.self-contained
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/shouyupedia/watchtower:latest-dev

@@ -6,10 +6,10 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/containrrr/watchtower/internal/actions"
-	"github.com/containrrr/watchtower/pkg/types"
+	"github.com/shouyupedia/watchtower/internal/actions"
+	"github.com/shouyupedia/watchtower/pkg/types"
 
-	. "github.com/containrrr/watchtower/internal/actions/mocks"
+	. "github.com/shouyupedia/watchtower/internal/actions/mocks"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )

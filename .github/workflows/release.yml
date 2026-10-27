@@ -5,7 +5,9 @@ on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
-      - '**/v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
 
 jobs:
   lint:
@@ -13,24 +15,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0
+          persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: 1.20.x
-      - uses: dominikh/staticcheck-action@ba605356b4b29a60e87ab9404b712f3461e566dc #v1.3.0
+          go-version-file: go.mod
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
         with:
-          version: "2022.1.1"
-          install-go: "false" # StaticCheck uses go v1.17 which does not support `any`
+          version: v2.5.0
 
   test:
     name: Test
     strategy:
       matrix:
-        go-version:
-          - 1.20.x
         platform:
           - ubuntu-latest
           - macos-latest
@@ -38,160 +38,56 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0
+          persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: 1.20.x
+          go-version-file: go.mod
       - name: Run tests
-        run: |
-          go test ./... -coverprofile coverage.out
+        run: go test ./... -coverprofile coverage.out
 
   build:
-    name: Build
+    name: Build and publish
     runs-on: ubuntu-latest
-    needs: 
+    needs:
       - test
       - lint
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
     env:
       CGO_ENABLED: 0
-      TAG: ${{ github.ref_name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: 1.20.x
-      - name: Login to Docker Hub
-        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc #v2
+          go-version-file: go.mod
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Login to GHCR
-        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc #v2
-        with:
-          username: ${{ secrets.BOT_USERNAME }}
-          password: ${{ secrets.BOT_GHCR_PAT }}
           registry: ghcr.io
-      - name: Build
-        uses: goreleaser/goreleaser-action@7ec5c2b0c6cdda6e8bbb49444bc797dd33d74dd8 #v3
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Release
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
-          version: v0.155.0
-          args: --debug
+          version: "~> v2"
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Enable experimental docker features
-        run: |
-          mkdir -p ~/.docker/ && \
-          echo '{"experimental": "enabled"}' > ~/.docker/config.json
-      - name: Create manifest for version
-        run: |
-          export DH_TAG=$(git tag --points-at HEAD | sed 's/^v*//')
-          docker manifest create \
-            containrrr/watchtower:$DH_TAG \
-            containrrr/watchtower:amd64-$DH_TAG \
-            containrrr/watchtower:i386-$DH_TAG \
-            containrrr/watchtower:armhf-$DH_TAG \
-            containrrr/watchtower:arm64v8-$DH_TAG
-          docker manifest create \
-            ghcr.io/containrrr/watchtower:$DH_TAG \
-            ghcr.io/containrrr/watchtower:amd64-$DH_TAG \
-            ghcr.io/containrrr/watchtower:i386-$DH_TAG \
-            ghcr.io/containrrr/watchtower:armhf-$DH_TAG \
-            ghcr.io/containrrr/watchtower:arm64v8-$DH_TAG
-      - name: Annotate manifest for version
-        run: |
-          for REPO in '' ghcr.io/ ; do
-          
-          docker manifest annotate \
-            ${REPO}containrrr/watchtower:$(echo $TAG | sed 's/^v*//') \
-            ${REPO}containrrr/watchtower:i386-$(echo $TAG | sed 's/^v*//') \
-            --os linux \
-            --arch 386
-          
-          docker manifest annotate \
-            ${REPO}containrrr/watchtower:$(echo $TAG | sed 's/^v*//') \
-            ${REPO}containrrr/watchtower:armhf-$(echo $TAG | sed 's/^v*//') \
-            --os linux \
-            --arch arm
-      
-          docker manifest annotate \
-            ${REPO}containrrr/watchtower:$(echo $TAG | sed 's/^v*//') \
-            ${REPO}containrrr/watchtower:arm64v8-$(echo $TAG | sed 's/^v*//') \
-            --os linux \
-            --arch arm64 \
-            --variant v8
-            
-            done
-      - name: Create manifest for latest
-        run: |
-          docker manifest create \
-            containrrr/watchtower:latest \
-            containrrr/watchtower:amd64-latest \
-            containrrr/watchtower:i386-latest \
-            containrrr/watchtower:armhf-latest \
-            containrrr/watchtower:arm64v8-latest
-          docker manifest create \
-            ghcr.io/containrrr/watchtower:latest \
-            ghcr.io/containrrr/watchtower:amd64-latest \
-            ghcr.io/containrrr/watchtower:i386-latest \
-            ghcr.io/containrrr/watchtower:armhf-latest \
-            ghcr.io/containrrr/watchtower:arm64v8-latest
-      - name: Annotate manifest for latest
-        run: |
-          for REPO in '' ghcr.io/ ; do
-
-          docker manifest annotate \
-            ${REPO}containrrr/watchtower:latest \
-            ${REPO}containrrr/watchtower:i386-latest \
-            --os linux \
-            --arch 386
-      
-          docker manifest annotate \
-            ${REPO}containrrr/watchtower:latest \
-            ${REPO}containrrr/watchtower:armhf-latest \
-            --os linux \
-            --arch arm
-            
-          docker manifest annotate \
-            ${REPO}containrrr/watchtower:latest \
-            ${REPO}containrrr/watchtower:arm64v8-latest \
-            --os linux \
-            --arch arm64 \
-            --variant v8
-
-          done
-      - name: Push manifests to Dockerhub
-        env:
-          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKER_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          docker login -u $DOCKER_USER -p $DOCKER_TOKEN && \
-            docker manifest push containrrr/watchtower:$(echo $TAG | sed 's/^v*//') && \
-            docker manifest push containrrr/watchtower:latest
-      - name: Push manifests to GitHub Container Registry
-        env:
-          DOCKER_USER: ${{ secrets.BOT_USERNAME }}
-          DOCKER_TOKEN: ${{ secrets.BOT_GHCR_PAT }}
-        run: |
-          docker login -u $DOCKER_USER -p $DOCKER_TOKEN ghcr.io && \
-            docker manifest push ghcr.io/containrrr/watchtower:$(echo $TAG | sed 's/^v*//') && \
-            docker manifest push ghcr.io/containrrr/watchtower:latest
-
-  renew-docs:
-    name: Refresh pkg.go.dev
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-    - name: Pull new module version
-      uses: andrewslotin/go-proxy-pull-action@50fea06a976087614babb9508e5c528b464f4645 #master@2022-10-14
-
-  
-  
-
-  

@@ -6,30 +6,53 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0
+          persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: 1.20.x
-      - uses: dominikh/staticcheck-action@ba605356b4b29a60e87ab9404b712f3461e566dc #v1.3.0
+          go-version-file: go.mod
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
         with:
-          version: "2023.1.6"
-          install-go: "false" # StaticCheck uses go v1.17 which does not support `any`
+          version: v2.5.0
+
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      - name: gosec
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.22.9 -exclude-dir=tplprev -severity medium -confidence medium ./...
+
   test:
     name: Test
     strategy:
       fail-fast: false
       matrix:
-        go-version:
-          - 1.20.x
         platform:
           - macos-latest
           - windows-latest
@@ -37,34 +60,46 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0
+          persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: 1.20.x
+          go-version-file: go.mod
       - name: Run tests
+        shell: bash
         run: |
-          go test -v -coverprofile coverage.out -covermode atomic ./... 
+          race=""
+          if [ "$RUNNER_OS" = "Linux" ]; then race="-race"; fi
+          go test -v $race -coverprofile coverage.out -covermode atomic ./...
       - name: Publish coverage
-        uses: codecov/codecov-action@v3
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository && env.CODECOV_TOKEN != '' }}
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+
   build:
     name: Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: 1.20.x
+          go-version-file: go.mod
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Build
-        uses: goreleaser/goreleaser-action@7ec5c2b0c6cdda6e8bbb49444bc797dd33d74dd8 #v3
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
-          version: v0.155.0
-          args: --snapshot --skip-publish --debug
+          version: "~> v2"
+          args: release --snapshot --skip=publish,sign,sbom --clean

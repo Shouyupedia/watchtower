@@ -1,8 +1,8 @@
 package registry_test
 
 import (
-	"github.com/containrrr/watchtower/internal/actions/mocks"
-	unit "github.com/containrrr/watchtower/pkg/registry"
+	"github.com/shouyupedia/watchtower/internal/actions/mocks"
+	unit "github.com/shouyupedia/watchtower/pkg/registry"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 

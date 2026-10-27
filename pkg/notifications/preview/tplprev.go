@@ -5,8 +5,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/containrrr/watchtower/pkg/notifications/preview/data"
-	"github.com/containrrr/watchtower/pkg/notifications/templates"
+	"github.com/shouyupedia/watchtower/pkg/notifications/preview/data"
+	"github.com/shouyupedia/watchtower/pkg/notifications/templates"
 )
 
 func Render(input string, states []data.State, loglevels []data.LogLevel) (string, error) {

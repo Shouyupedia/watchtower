@@ -3,8 +3,8 @@ package mocks
 import (
 	"errors"
 
-	"github.com/containrrr/watchtower/pkg/session"
-	wt "github.com/containrrr/watchtower/pkg/types"
+	"github.com/shouyupedia/watchtower/pkg/session"
+	wt "github.com/shouyupedia/watchtower/pkg/types"
 )
 
 // CreateMockProgressReport creates a mock report from a given set of container states

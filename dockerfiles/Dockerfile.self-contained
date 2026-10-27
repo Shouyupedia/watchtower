@@ -2,25 +2,26 @@
 # Builder
 #
 
-FROM golang:alpine as builder
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
-# use version (for example "v0.3.3") or "main"
-ARG WATCHTOWER_VERSION=main
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION=dev
 
-RUN apk add --no-cache \
-    alpine-sdk \
-    ca-certificates \
-    git \
-    tzdata
+RUN apk add --no-cache ca-certificates tzdata
 
-RUN git clone --branch "${WATCHTOWER_VERSION}" https://github.com/containrrr/watchtower.git
+WORKDIR /watchtower
 
-RUN \
-  cd watchtower && \
-  \
-  GO111MODULE=on CGO_ENABLED=0 GOOS=linux go build -a -ldflags "-extldflags '-static' -X github.com/containrrr/watchtower/internal/meta.Version=$(git describe --tags)" . && \
-  GO111MODULE=on go test ./... -v
+# Download modules first so that this layer is cached until go.mod/go.sum change
+COPY go.mod go.sum ./
+RUN go mod download
 
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath \
+    -ldflags "-s -w -X github.com/shouyupedia/watchtower/internal/meta.Version=${VERSION}" \
+    -o /out/watchtower .
 
 #
 # watchtower
@@ -30,10 +31,9 @@ FROM scratch
 
 LABEL "com.centurylinklabs.watchtower"="true"
 
-# copy files from other container
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=builder /go/watchtower/watchtower /watchtower
+COPY --from=builder /out/watchtower /watchtower
 
 HEALTHCHECK CMD [ "/watchtower", "--health-check"]
 
