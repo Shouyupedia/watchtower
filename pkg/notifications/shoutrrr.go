@@ -21,6 +21,10 @@ var LocalLog = log.WithField("notify", "no")
 
 const (
 	shoutrrrType = "shoutrrr"
+
+	// messageBuffer is the number of notifications that can be waiting to be sent before logging starts to block.
+	// Sending can be slow (and is delayed on purpose by the delay option), logging must not be.
+	messageBuffer = 64
 )
 
 type router interface {
@@ -109,7 +113,7 @@ func createNotifier(urls []string, level log.Level, tplString string, legacy boo
 	return &shoutrrrTypeNotifier{
 		Urls:           urls,
 		Router:         r,
-		messages:       make(chan string, 1),
+		messages:       make(chan string, messageBuffer),
 		done:           make(chan bool),
 		logLevel:       level,
 		template:       tpl,

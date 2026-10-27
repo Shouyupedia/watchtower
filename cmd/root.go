@@ -43,6 +43,7 @@ var (
 	rollingRestart    bool
 	scope             string
 	labelPrecedence   bool
+	checkConcurrency  int
 )
 
 var rootCmd = NewRootCommand()
@@ -100,6 +101,7 @@ func PreRun(cmd *cobra.Command, _ []string) {
 	rollingRestart, _ = f.GetBool("rolling-restart")
 	scope, _ = f.GetString("scope")
 	labelPrecedence, _ = f.GetBool("label-take-precedence")
+	checkConcurrency, _ = f.GetInt("check-concurrency")
 
 	if scope != "" {
 		log.Debugf(`Using scope %q`, scope)
@@ -244,11 +246,30 @@ func logNotifyExit(err error) {
 	os.Exit(1)
 }
 
+// awaitDockerClient waits for the Docker daemon to answer, so that watchtower can be started together with it
+// (or before it) without failing. It carries on after a while either way, and lets the first real call report the problem.
 func awaitDockerClient(ctx context.Context) {
-	log.Debug("Sleeping for a second to ensure the docker api client has been properly initialized.")
-	select {
-	case <-time.After(1 * time.Second):
-	case <-ctx.Done():
+	const maxWait = 30 * time.Second
+	deadline := time.Now().Add(maxWait)
+	backoff := 100 * time.Millisecond
+
+	for {
+		err := client.Ping(ctx)
+		if err == nil {
+			log.Debug("The docker daemon is reachable.")
+			return
+		}
+		if ctx.Err() != nil || time.Now().Add(backoff).After(deadline) {
+			log.WithError(err).Warn("The docker daemon did not respond, continuing anyway.")
+			return
+		}
+		log.WithError(err).Debugf("The docker daemon is not reachable yet, retrying in %v", backoff)
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return
+		}
+		backoff = min(backoff*2, 2*time.Second)
 	}
 }
 
@@ -401,6 +422,8 @@ func runUpdatesWithNotifications(ctx context.Context, filter t.Filter) *metrics.
 		RollingRestart:  rollingRestart,
 		LabelPrecedence: labelPrecedence,
 		NoPull:          noPull,
+
+		CheckConcurrency: checkConcurrency,
 	}
 	result, err := actions.Update(ctx, client, updateParams)
 	if err != nil {

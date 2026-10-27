@@ -149,6 +149,11 @@ func RegisterSystemFlags(rootCmd *cobra.Command) {
 		envBool("WATCHTOWER_ROLLING_RESTART"),
 		"Restart containers one at a time")
 
+	flags.Int(
+		"check-concurrency",
+		envInt("WATCHTOWER_CHECK_CONCURRENCY"),
+		"Number of containers to check for new images at the same time. Lower it if the registry rate limits you")
+
 	flags.BoolP(
 		"http-api-update",
 		"",
@@ -430,6 +435,7 @@ func envDuration(key string) time.Duration {
 func SetDefaults() {
 	viper.AutomaticEnv()
 	viper.SetDefault("DOCKER_HOST", "unix:///var/run/docker.sock")
+	viper.SetDefault("WATCHTOWER_CHECK_CONCURRENCY", 4)
 	viper.SetDefault("WATCHTOWER_HTTP_API_LISTEN", ":8080")
 	viper.SetDefault("WATCHTOWER_POLL_INTERVAL", defaultInterval)
 	viper.SetDefault("WATCHTOWER_TIMEOUT", time.Second*10)

@@ -141,7 +141,7 @@ var _ = Describe("the client", func() {
 		When("no filter is provided", func() {
 			It("should return all available containers", func() {
 				mockServer.AppendHandlers(mocks.ListContainersHandler("running"))
-				mockServer.AppendHandlers(mocks.GetContainerHandlers(&mocks.Watchtower, &mocks.Running)...)
+				mocks.RouteContainerHandlers(mockServer, &mocks.Watchtower, &mocks.Running)
 				client := dockerClient{
 					api:           docker,
 					ClientOptions: ClientOptions{},
@@ -154,7 +154,7 @@ var _ = Describe("the client", func() {
 		When("a filter matching nothing", func() {
 			It("should return an empty array", func() {
 				mockServer.AppendHandlers(mocks.ListContainersHandler("running"))
-				mockServer.AppendHandlers(mocks.GetContainerHandlers(&mocks.Watchtower, &mocks.Running)...)
+				mocks.RouteContainerHandlers(mockServer, &mocks.Watchtower, &mocks.Running)
 				filter := filters.FilterByNames([]string{"lollercoaster"}, filters.NoFilter)
 				client := dockerClient{
 					api:           docker,
@@ -168,7 +168,7 @@ var _ = Describe("the client", func() {
 		When("a watchtower filter is provided", func() {
 			It("should return only the watchtower container", func() {
 				mockServer.AppendHandlers(mocks.ListContainersHandler("running"))
-				mockServer.AppendHandlers(mocks.GetContainerHandlers(&mocks.Watchtower, &mocks.Running)...)
+				mocks.RouteContainerHandlers(mockServer, &mocks.Watchtower, &mocks.Running)
 				client := dockerClient{
 					api:           docker,
 					ClientOptions: ClientOptions{},
@@ -181,7 +181,7 @@ var _ = Describe("the client", func() {
 		When(`include stopped is enabled`, func() {
 			It("should return both stopped and running containers", func() {
 				mockServer.AppendHandlers(mocks.ListContainersHandler("running", "exited", "created"))
-				mockServer.AppendHandlers(mocks.GetContainerHandlers(&mocks.Stopped, &mocks.Watchtower, &mocks.Running)...)
+				mocks.RouteContainerHandlers(mockServer, &mocks.Stopped, &mocks.Watchtower, &mocks.Running)
 				client := dockerClient{
 					api:           docker,
 					ClientOptions: ClientOptions{IncludeStopped: true},
@@ -194,7 +194,7 @@ var _ = Describe("the client", func() {
 		When(`include restarting is enabled`, func() {
 			It("should return both restarting and running containers", func() {
 				mockServer.AppendHandlers(mocks.ListContainersHandler("running", "restarting"))
-				mockServer.AppendHandlers(mocks.GetContainerHandlers(&mocks.Watchtower, &mocks.Running, &mocks.Restarting)...)
+				mocks.RouteContainerHandlers(mockServer, &mocks.Watchtower, &mocks.Running, &mocks.Restarting)
 				client := dockerClient{
 					api:           docker,
 					ClientOptions: ClientOptions{IncludeRestarting: true},
@@ -207,7 +207,7 @@ var _ = Describe("the client", func() {
 		When(`include restarting is disabled`, func() {
 			It("should not return restarting containers", func() {
 				mockServer.AppendHandlers(mocks.ListContainersHandler("running"))
-				mockServer.AppendHandlers(mocks.GetContainerHandlers(&mocks.Watchtower, &mocks.Running)...)
+				mocks.RouteContainerHandlers(mockServer, &mocks.Watchtower, &mocks.Running)
 				client := dockerClient{
 					api:           docker,
 					ClientOptions: ClientOptions{IncludeRestarting: false},

@@ -347,3 +347,15 @@ func TestFilterByImageKeepsRegistryPorts(t *testing.T) {
 	digest.On("ImageName").Return("registry.local:5000/team/app@sha256:abc")
 	assert.True(t, filter(digest))
 }
+
+func TestFilterByNamesWithInvalidPatternStillMatchesLiterally(t *testing.T) {
+	filter := FilterByNames([]string{"broken("}, NoFilter)
+
+	literal := &mocks.FilterableContainer{}
+	literal.On("Name").Return("/broken(")
+	assert.True(t, filter(literal))
+
+	other := &mocks.FilterableContainer{}
+	other.On("Name").Return("/other")
+	assert.False(t, filter(other))
+}

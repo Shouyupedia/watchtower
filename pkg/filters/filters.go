@@ -19,13 +19,22 @@ func FilterByNames(names []string, baseFilter t.Filter) t.Filter {
 		return baseFilter
 	}
 
+	// Compile the patterns once instead of for every container. Names that are not valid expressions
+	// can still match literally, which is checked first.
+	patterns := make([]*regexp.Regexp, len(names))
+	for i, name := range names {
+		if re, err := regexp.Compile(name); err == nil {
+			patterns[i] = re
+		}
+	}
+
 	return func(c t.FilterableContainer) bool {
-		for _, name := range names {
+		for i, name := range names {
 			if name == c.Name() || name == c.Name()[1:] {
 				return baseFilter(c)
 			}
 
-			if re, err := regexp.Compile(name); err == nil {
+			if re := patterns[i]; re != nil {
 				indices := re.FindStringIndex(c.Name())
 				if indices == nil {
 					continue

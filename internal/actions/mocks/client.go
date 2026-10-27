@@ -99,3 +99,8 @@ func (client MockClient) IsContainerStale(_ context.Context, cont t.Container, p
 func (client MockClient) WarnOnHeadPullFailed(_ t.Container) bool {
 	return true
 }
+
+// Ping is a mock method, the mock daemon is always reachable
+func (client MockClient) Ping(_ context.Context) error {
+	return nil
+}

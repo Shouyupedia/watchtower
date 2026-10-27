@@ -8,12 +8,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// ExecutePreChecks tries to run the pre-check lifecycle hook for all containers included by the current filter.
-func ExecutePreChecks(ctx context.Context, client container.Client, params types.UpdateParams) {
-	containers, err := client.ListContainers(ctx, params.Filter)
-	if err != nil {
-		return
-	}
+// ExecutePreChecks tries to run the pre-check lifecycle hook for all of the supplied containers.
+func ExecutePreChecks(ctx context.Context, client container.Client, containers []types.Container) {
 	for _, currentContainer := range containers {
 		ExecutePreCheckCommand(ctx, client, currentContainer)
 	}

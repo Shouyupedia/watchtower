@@ -9,6 +9,7 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -17,6 +18,8 @@ import (
 	"github.com/docker/docker/api/types/network"
 	sdkClient "github.com/docker/docker/client"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/shouyupedia/watchtower/pkg/registry"
 	"github.com/shouyupedia/watchtower/pkg/registry/digest"
@@ -28,8 +31,15 @@ const defaultStopSignal = "SIGTERM"
 // apiCallTimeout bounds a single, non-streaming call to the Docker daemon
 const apiCallTimeout = 2 * time.Minute
 
-// pollInterval is how often the state of a container is checked while waiting for it to stop
-const pollInterval = time.Second
+// pollInterval and minPollInterval bound how often the state of a container is checked while waiting for it
+// to stop. The interval starts out short, since most containers stop right away, and backs off from there.
+const (
+	pollInterval    = time.Second
+	minPollInterval = 100 * time.Millisecond
+)
+
+// inspectConcurrency is the number of containers that are inspected in parallel when listing containers
+const inspectConcurrency = 8
 
 // maxExecOutputBytes caps how much output of a lifecycle hook command is kept
 const maxExecOutputBytes = 1 << 20
@@ -46,6 +56,7 @@ type Client interface {
 	ExecuteCommand(ctx context.Context, containerID t.ContainerID, command string, timeout int) (SkipUpdate bool, err error)
 	RemoveImageByID(context.Context, t.ImageID) error
 	WarnOnHeadPullFailed(container t.Container) bool
+	Ping(context.Context) error
 }
 
 // NewClient returns a new Client instance which can be used to interact with
@@ -64,6 +75,7 @@ func NewClient(opts ClientOptions) Client {
 	return dockerClient{
 		api:           cli,
 		ClientOptions: opts,
+		pulls:         &singleflight.Group{},
 	}
 }
 
@@ -91,6 +103,8 @@ const (
 type dockerClient struct {
 	api sdkClient.APIClient
 	ClientOptions
+	// pulls makes sure an image is only pulled once at a time, no matter how many containers use it
+	pulls *singleflight.Group
 }
 
 func (client dockerClient) WarnOnHeadPullFailed(container t.Container) bool {
@@ -135,19 +149,55 @@ func (client dockerClient) ListContainers(ctx context.Context, fn t.Filter) ([]t
 		return nil, err
 	}
 
-	for _, runningContainer := range containers {
+	// Inspecting is what makes listing slow, as it takes a round trip per container (and one for its image).
+	// Do it in parallel, while keeping the order the daemon returned the containers in.
+	inspected := make([]t.Container, len(containers))
+	images := &imageCache{}
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(inspectConcurrency)
+	for i, runningContainer := range containers {
+		group.Go(func() error {
+			c, err := client.getContainer(groupCtx, t.ContainerID(runningContainer.ID), images)
+			if err != nil {
+				return err
+			}
+			inspected[i] = c
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
 
-		c, err := client.GetContainer(ctx, t.ContainerID(runningContainer.ID))
-		if err != nil {
-			return nil, err
-		}
-
+	for _, c := range inspected {
 		if fn(c) {
 			cs = append(cs, c)
 		}
 	}
 
 	return cs, nil
+}
+
+// imageCache remembers image lookups for the duration of a single listing, since containers tend to share images
+type imageCache struct {
+	mu     sync.Mutex
+	images map[string]*image.InspectResponse
+}
+
+func (ic *imageCache) get(key string) (*image.InspectResponse, bool) {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	info, found := ic.images[key]
+	return info, found
+}
+
+func (ic *imageCache) put(key string, info *image.InspectResponse) {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	if ic.images == nil {
+		ic.images = map[string]*image.InspectResponse{}
+	}
+	ic.images[key] = info
 }
 
 func (client dockerClient) createListFilter() filters.Args {
@@ -167,6 +217,10 @@ func (client dockerClient) createListFilter() filters.Args {
 }
 
 func (client dockerClient) GetContainer(ctx context.Context, containerID t.ContainerID) (t.Container, error) {
+	return client.getContainer(ctx, containerID, nil)
+}
+
+func (client dockerClient) getContainer(ctx context.Context, containerID t.ContainerID, images *imageCache) (t.Container, error) {
 	ctx, cancel := callCtx(ctx)
 	defer cancel()
 
@@ -191,13 +245,38 @@ func (client dockerClient) GetContainer(ctx context.Context, containerID t.Conta
 		}
 	}
 
+	if images != nil {
+		if cached, ok := images.get(containerInfo.Image); ok {
+			if cached == nil {
+				return &Container{containerInfo: &containerInfo, imageInfo: nil}, nil
+			}
+			imageInfo := *cached
+			return &Container{containerInfo: &containerInfo, imageInfo: &imageInfo}, nil
+		}
+	}
+
 	imageInfo, err := client.api.ImageInspect(ctx, containerInfo.Image)
 	if err != nil {
 		log.Warnf("Failed to retrieve container image info: %v", err)
+		if images != nil {
+			images.put(containerInfo.Image, nil)
+		}
 		return &Container{containerInfo: &containerInfo, imageInfo: nil}, nil
+	}
+	if images != nil {
+		cached := imageInfo
+		images.put(containerInfo.Image, &cached)
 	}
 
 	return &Container{containerInfo: &containerInfo, imageInfo: &imageInfo}, nil
+}
+
+// Ping checks whether the Docker daemon is reachable
+func (client dockerClient) Ping(ctx context.Context) error {
+	ctx, cancel := callCtx(ctx)
+	defer cancel()
+	_, err := client.api.Ping(ctx)
+	return err
 }
 
 func (client dockerClient) StopContainer(ctx context.Context, c t.Container, timeout time.Duration) error {
@@ -417,6 +496,17 @@ func (client dockerClient) PullImage(ctx context.Context, container t.Container)
 
 	log.WithFields(fields).Debugf("Pulling image")
 
+	// Containers sharing an image are checked in parallel, but the image only needs to be pulled once
+	if client.pulls == nil {
+		return client.pullImage(ctx, imageName, opts)
+	}
+	_, err, _ = client.pulls.Do(imageName, func() (interface{}, error) {
+		return nil, client.pullImage(ctx, imageName, opts)
+	})
+	return err
+}
+
+func (client dockerClient) pullImage(ctx context.Context, imageName string, opts image.PullOptions) error {
 	response, err := client.api.ImagePull(ctx, imageName, opts)
 	if err != nil {
 		log.Debugf("Error pulling image %s, %s", imageName, err)
@@ -585,6 +675,7 @@ func (client dockerClient) waitForExecOrTimeout(ctx context.Context, ID string, 
 
 func (client dockerClient) waitForStopOrTimeout(ctx context.Context, c t.Container, waitTime time.Duration) error {
 	timeout := time.After(waitTime)
+	interval := minPollInterval
 
 	for {
 		select {
@@ -602,9 +693,10 @@ func (client dockerClient) waitForStopOrTimeout(ctx context.Context, c t.Contain
 				return nil
 			}
 		}
-		if err := sleepCtx(ctx, pollInterval); err != nil {
+		if err := sleepCtx(ctx, interval); err != nil {
 			return err
 		}
+		interval = min(interval*2, pollInterval)
 	}
 }
 

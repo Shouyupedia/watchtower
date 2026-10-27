@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	dockercontainer "github.com/docker/docker/api/types/container"
@@ -60,6 +61,23 @@ func GetContainerHandlers(containerRefs ...*ContainerRef) []http.HandlerFunc {
 	}
 
 	return handlers
+}
+
+// RouteContainerHandlers makes the server answer lookups for the supplied containers (and their images and referenced
+// containers) by path instead of in the order they are made, and any number of times. Listing containers inspects them
+// in parallel and looks up shared images once, so the order and number of requests are not predictable.
+func RouteContainerHandlers(server *ghttp.Server, containerRefs ...*ContainerRef) {
+	routeContainer := func(cr *ContainerRef) {
+		server.RouteToHandler("GET", regexp.MustCompile(`/containers/`+regexp.QuoteMeta(string(cr.id))+`/json$`), getContainerFileHandler(cr))
+	}
+	for _, containerRef := range containerRefs {
+		routeContainer(containerRef)
+		for _, ref := range containerRef.references {
+			routeContainer(ref)
+		}
+		server.RouteToHandler("GET", regexp.MustCompile(`/images/`+regexp.QuoteMeta(string(containerRef.image.id))+`/json$`),
+			getImageHandler(containerRef.image.id, RespondWithJSONFile(containerRef.image.getFileName(), http.StatusOK)))
+	}
 }
 
 func createFilterArgs(statuses []string) filters.Args {

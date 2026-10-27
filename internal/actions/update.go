@@ -3,6 +3,7 @@ package actions
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/shouyupedia/watchtower/internal/util"
 	"github.com/shouyupedia/watchtower/pkg/container"
@@ -22,19 +23,24 @@ func Update(ctx context.Context, client container.Client, params types.UpdatePar
 	progress := &session.Progress{}
 	staleCount := 0
 
-	if params.LifecycleHooks {
-		lifecycle.ExecutePreChecks(ctx, client, params)
-	}
-
 	containers, err := client.ListContainers(ctx, params.Filter)
 	if err != nil {
 		return nil, err
 	}
 
+	if params.LifecycleHooks {
+		// The containers have just been listed, so there is no need to ask the daemon for them again
+		lifecycle.ExecutePreChecks(ctx, client, containers)
+	}
+
 	staleCheckFailed := 0
 
+	// Checking for new images means talking to registries, so let several checks wait for them at the same time.
+	// The results are applied below in the original order.
+	checks := checkStaleness(ctx, client, containers, params)
+
 	for i, targetContainer := range containers {
-		stale, newestImage, err := client.IsContainerStale(ctx, targetContainer, params)
+		stale, newestImage, err := checks[i].stale, checks[i].newestImage, checks[i].err
 		shouldUpdate := stale && !params.NoRestart && !targetContainer.IsMonitorOnly(params)
 		if err == nil && shouldUpdate {
 			// Check to make sure we have all the necessary information for recreating the container
@@ -93,6 +99,41 @@ func Update(ctx context.Context, client container.Client, params types.UpdatePar
 		lifecycle.ExecutePostChecks(ctx, client, params)
 	}
 	return progress.Report(), nil
+}
+
+type staleCheck struct {
+	stale       bool
+	newestImage types.ImageID
+	err         error
+}
+
+// checkStaleness runs IsContainerStale for every container, up to params.CheckConcurrency at a time
+func checkStaleness(ctx context.Context, client container.Client, containers []types.Container, params types.UpdateParams) []staleCheck {
+	results := make([]staleCheck, len(containers))
+	check := func(i int) {
+		results[i].stale, results[i].newestImage, results[i].err = client.IsContainerStale(ctx, containers[i], params)
+	}
+
+	if params.CheckConcurrency <= 1 || len(containers) <= 1 {
+		for i := range containers {
+			check(i)
+		}
+		return results
+	}
+
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, params.CheckConcurrency)
+	for i := range containers {
+		slots <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
+			check(i)
+		}()
+	}
+	wg.Wait()
+	return results
 }
 
 func performRollingRestart(ctx context.Context, containers []types.Container, client container.Client, params types.UpdateParams) map[types.ContainerID]error {

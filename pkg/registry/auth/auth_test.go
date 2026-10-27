@@ -166,6 +166,9 @@ var _ = Describe("the auth module", func() {
 	Describe("GetBearerHeader", func() {
 		imageRef, _ := ref.ParseNormalizedNamed("ghcr.io/user/image")
 		var server *httptest.Server
+		BeforeEach(func() {
+			auth.ResetCache()
+		})
 		AfterEach(func() {
 			httpclient.SetInsecureSkipVerify(false)
 			if server != nil {

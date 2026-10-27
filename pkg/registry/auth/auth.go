@@ -37,22 +37,17 @@ func GetToken(ctx context.Context, container types.Container, registryAuth strin
 	URL := GetChallengeURL(normalizedRef)
 	logrus.WithField("URL", URL.String()).Debug("Built challenge URL")
 
-	var req *http.Request
-	if req, err = GetChallengeRequest(ctx, URL); err != nil {
-		return "", err
+	v, cached := challenges.get(URL.Host)
+	if cached {
+		logrus.WithField("header", v).Debug("Using cached challenge")
+	} else {
+		if v, err = fetchChallenge(ctx, URL); err != nil {
+			return "", err
+		}
+		if v != "" {
+			challenges.put(URL.Host, v, challengeTTL)
+		}
 	}
-
-	var res *http.Response
-	if res, err = httpclient.Get().Do(req); err != nil {
-		return "", err
-	}
-	defer func() { _ = res.Body.Close() }()
-	v := res.Header.Get(ChallengeHeader)
-
-	logrus.WithFields(logrus.Fields{
-		"status": res.Status,
-		"header": v,
-	}).Debug("Got response to challenge request")
 
 	scheme, _, _ := strings.Cut(strings.TrimSpace(v), " ")
 	switch strings.ToLower(scheme) {
@@ -67,6 +62,26 @@ func GetToken(ctx context.Context, container types.Container, registryAuth strin
 	}
 
 	return "", errors.New("unsupported challenge type from registry")
+}
+
+func fetchChallenge(ctx context.Context, URL url.URL) (string, error) {
+	req, err := GetChallengeRequest(ctx, URL)
+	if err != nil {
+		return "", err
+	}
+
+	res, err := httpclient.Get().Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = res.Body.Close() }()
+	v := res.Header.Get(ChallengeHeader)
+
+	logrus.WithFields(logrus.Fields{
+		"status": res.Status,
+		"header": v,
+	}).Debug("Got response to challenge request")
+	return v, nil
 }
 
 // GetChallengeRequest creates a request for getting challenge instructions
@@ -85,6 +100,12 @@ func GetBearerHeader(ctx context.Context, challenge string, imageRef ref.Named, 
 	authURL, err := GetAuthURL(challenge, imageRef)
 	if err != nil {
 		return "", err
+	}
+
+	cacheKey := tokenCacheKey(authURL.String(), registryAuth)
+	if header, found := tokens.get(cacheKey); found {
+		logrus.Debug("Using cached token")
+		return header, nil
 	}
 
 	var r *http.Request
@@ -129,7 +150,9 @@ func GetBearerHeader(ctx context.Context, challenge string, imageRef ref.Named, 
 		return "", errors.New("token server response did not contain a token")
 	}
 
-	return fmt.Sprintf("Bearer %s", token), nil
+	header := fmt.Sprintf("Bearer %s", token)
+	tokens.put(cacheKey, header, tokenTTL(tokenResponse.ExpiresIn))
+	return header, nil
 }
 
 // GetAuthURL from the instructions in the challenge

@@ -474,6 +474,16 @@ Environment Variable: WATCHTOWER_REGISTRY_TLS_SKIP_VERIFY
              Default: false
 ```
 
+## Check concurrency
+Number of containers that are checked for new images at the same time. Containers that share an image only cause the image to be pulled once. Use `1` to check one container at a time, e.g. if your registry rate limits you.
+
+```text
+            Argument: --check-concurrency
+Environment Variable: WATCHTOWER_CHECK_CONCURRENCY
+                Type: Integer
+             Default: 4
+```
+
 ## Health check
 
 Returns a success exit code to enable usage with docker `HEALTHCHECK`. This check is naive and only returns checks whether there is another process running inside the container, as it is the only known form of failure state for watchtowers container.
