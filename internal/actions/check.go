@@ -1,6 +1,7 @@
 package actions
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
@@ -14,11 +15,11 @@ import (
 )
 
 // CheckForSanity makes sure everything is sane before starting
-func CheckForSanity(client container.Client, filter types.Filter, rollingRestarts bool) error {
+func CheckForSanity(ctx context.Context, client container.Client, filter types.Filter, rollingRestarts bool) error {
 	log.Debug("Making sure everything is sane before starting")
 
 	if rollingRestarts {
-		containers, err := client.ListContainers(filter)
+		containers, err := client.ListContainers(ctx, filter)
 		if err != nil {
 			return err
 		}
@@ -38,12 +39,12 @@ func CheckForSanity(client container.Client, filter types.Filter, rollingRestart
 // watchtower running simultaneously. If multiple watchtower containers are detected, this function
 // will stop and remove all but the most recently started container. This behaviour can be bypassed
 // if a scope UID is defined.
-func CheckForMultipleWatchtowerInstances(client container.Client, cleanup bool, scope string) error {
+func CheckForMultipleWatchtowerInstances(ctx context.Context, client container.Client, cleanup bool, scope string) error {
 	filter := filters.WatchtowerContainersFilter
 	if scope != "" {
 		filter = filters.FilterByScope(scope, filter)
 	}
-	containers, err := client.ListContainers(filter)
+	containers, err := client.ListContainers(ctx, filter)
 
 	if err != nil {
 		return err
@@ -55,17 +56,17 @@ func CheckForMultipleWatchtowerInstances(client container.Client, cleanup bool, 
 	}
 
 	log.Info("Found multiple running watchtower instances. Cleaning up.")
-	return cleanupExcessWatchtowers(containers, client, cleanup)
+	return cleanupExcessWatchtowers(ctx, containers, client, cleanup)
 }
 
-func cleanupExcessWatchtowers(containers []types.Container, client container.Client, cleanup bool) error {
+func cleanupExcessWatchtowers(ctx context.Context, containers []types.Container, client container.Client, cleanup bool) error {
 	var stopErrors int
 
 	sort.Sort(sorter.ByCreated(containers))
 	allContainersExceptLast := containers[0 : len(containers)-1]
 
 	for _, c := range allContainersExceptLast {
-		if err := client.StopContainer(c, 10*time.Minute); err != nil {
+		if err := client.StopContainer(ctx, c, 10*time.Minute); err != nil {
 			// logging the original here as we're just returning a count
 			log.WithError(err).Error("Could not stop a previous watchtower instance.")
 			stopErrors++
@@ -73,7 +74,7 @@ func cleanupExcessWatchtowers(containers []types.Container, client container.Cli
 		}
 
 		if cleanup {
-			if err := client.RemoveImageByID(c.ImageID()); err != nil {
+			if err := client.RemoveImageByID(ctx, c.ImageID()); err != nil {
 				log.WithError(err).Warning("Could not cleanup watchtower images, possibly because of other watchtowers instances in other scopes.")
 			}
 		}

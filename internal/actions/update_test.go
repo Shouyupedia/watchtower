@@ -1,15 +1,15 @@
 package actions_test
 
 import (
-	"time"
-
-	dockerTypes "github.com/docker/docker/api/types"
+	"context"
 	dockerContainer "github.com/docker/docker/api/types/container"
+	dockerimage "github.com/docker/docker/api/types/image"
 	"github.com/docker/go-connections/nat"
 	"github.com/shouyupedia/watchtower/internal/actions"
 	"github.com/shouyupedia/watchtower/pkg/types"
+	"time"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "github.com/shouyupedia/watchtower/internal/actions/mocks"
 )
@@ -44,7 +44,7 @@ func getLinkedTestData(withImageInfo bool) *TestData {
 		"fake-image1:latest",
 		time.Now().AddDate(0, 0, -1))
 
-	var imageInfo *dockerTypes.ImageInspect
+	var imageInfo *dockerimage.InspectResponse
 	if withImageInfo {
 		imageInfo = CreateMockImageInfo("test-container-02")
 	}
@@ -70,7 +70,7 @@ var _ = Describe("the update action", func() {
 		When("there are multiple containers using the same image", func() {
 			It("should only try to remove the image once", func() {
 				client := CreateMockClient(getCommonTestData(""), false, false)
-				_, err := actions.Update(client, types.UpdateParams{Cleanup: true})
+				_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImageCount).To(Equal(1))
 			})
@@ -88,7 +88,7 @@ var _ = Describe("the update action", func() {
 					),
 				)
 				client := CreateMockClient(testData, false, false)
-				_, err := actions.Update(client, types.UpdateParams{Cleanup: true})
+				_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImageCount).To(Equal(2))
 			})
@@ -96,7 +96,7 @@ var _ = Describe("the update action", func() {
 		When("there are linked containers being updated", func() {
 			It("should not try to remove their images", func() {
 				client := CreateMockClient(getLinkedTestData(true), false, false)
-				_, err := actions.Update(client, types.UpdateParams{Cleanup: true})
+				_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImageCount).To(Equal(1))
 			})
@@ -104,7 +104,7 @@ var _ = Describe("the update action", func() {
 		When("performing a rolling restart update", func() {
 			It("should try to remove the image once", func() {
 				client := CreateMockClient(getCommonTestData(""), false, false)
-				_, err := actions.Update(client, types.UpdateParams{Cleanup: true, RollingRestart: true})
+				_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true, RollingRestart: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImageCount).To(Equal(1))
 			})
@@ -113,7 +113,7 @@ var _ = Describe("the update action", func() {
 			It("should gracefully fail", func() {
 				client := CreateMockClient(getLinkedTestData(false), false, false)
 
-				report, err := actions.Update(client, types.UpdateParams{})
+				report, err := actions.Update(context.Background(), client, types.UpdateParams{})
 				Expect(err).NotTo(HaveOccurred())
 				// Note: Linked containers that were skipped for recreation is not counted in Failed
 				// If this happens, an error is emitted to the logs, so a notification should still be sent.
@@ -152,7 +152,7 @@ var _ = Describe("the update action", func() {
 					false,
 					false,
 				)
-				_, err := actions.Update(client, types.UpdateParams{Cleanup: true})
+				_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImageCount).To(Equal(1))
 			})
@@ -178,7 +178,7 @@ var _ = Describe("the update action", func() {
 					false,
 					false,
 				)
-				_, err := actions.Update(client, types.UpdateParams{Cleanup: true, MonitorOnly: true})
+				_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true, MonitorOnly: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImageCount).To(Equal(0))
 			})
@@ -205,7 +205,7 @@ var _ = Describe("the update action", func() {
 						false,
 						false,
 					)
-					_, err := actions.Update(client, types.UpdateParams{Cleanup: true, MonitorOnly: true, LabelPrecedence: true})
+					_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true, MonitorOnly: true, LabelPrecedence: true})
 					Expect(err).NotTo(HaveOccurred())
 					Expect(client.TestData.TriedToRemoveImageCount).To(Equal(1))
 				})
@@ -231,7 +231,7 @@ var _ = Describe("the update action", func() {
 						false,
 						false,
 					)
-					_, err := actions.Update(client, types.UpdateParams{Cleanup: true, MonitorOnly: true, LabelPrecedence: true})
+					_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true, MonitorOnly: true, LabelPrecedence: true})
 					Expect(err).NotTo(HaveOccurred())
 					Expect(client.TestData.TriedToRemoveImageCount).To(Equal(0))
 				})
@@ -249,7 +249,7 @@ var _ = Describe("the update action", func() {
 						false,
 						false,
 					)
-					_, err := actions.Update(client, types.UpdateParams{Cleanup: true, MonitorOnly: true, LabelPrecedence: true})
+					_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true, MonitorOnly: true, LabelPrecedence: true})
 					Expect(err).NotTo(HaveOccurred())
 					Expect(client.TestData.TriedToRemoveImageCount).To(Equal(0))
 				})
@@ -286,7 +286,7 @@ var _ = Describe("the update action", func() {
 					false,
 				)
 
-				_, err := actions.Update(client, types.UpdateParams{Cleanup: true, LifecycleHooks: true})
+				_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true, LifecycleHooks: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImageCount).To(Equal(0))
 			})
@@ -318,7 +318,7 @@ var _ = Describe("the update action", func() {
 					false,
 					false,
 				)
-				_, err := actions.Update(client, types.UpdateParams{Cleanup: true, LifecycleHooks: true})
+				_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true, LifecycleHooks: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImageCount).To(Equal(0))
 			})
@@ -350,7 +350,7 @@ var _ = Describe("the update action", func() {
 					false,
 					false,
 				)
-				_, err := actions.Update(client, types.UpdateParams{Cleanup: true, LifecycleHooks: true})
+				_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true, LifecycleHooks: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImageCount).To(Equal(1))
 			})
@@ -429,7 +429,7 @@ var _ = Describe("the update action", func() {
 					false,
 					false,
 				)
-				_, err := actions.Update(client, types.UpdateParams{Cleanup: true, LifecycleHooks: true})
+				_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true, LifecycleHooks: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImageCount).To(Equal(1))
 			})
@@ -461,7 +461,7 @@ var _ = Describe("the update action", func() {
 					false,
 					false,
 				)
-				_, err := actions.Update(client, types.UpdateParams{Cleanup: true, LifecycleHooks: true})
+				_, err := actions.Update(context.Background(), client, types.UpdateParams{Cleanup: true, LifecycleHooks: true})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImageCount).To(Equal(1))
 			})

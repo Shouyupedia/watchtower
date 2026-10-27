@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"math"
 	"os"
 	"os/signal"
@@ -9,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/robfig/cron"
+	"github.com/robfig/cron/v3"
 	"github.com/shouyupedia/watchtower/internal/actions"
 	"github.com/shouyupedia/watchtower/internal/flags"
 	"github.com/shouyupedia/watchtower/internal/meta"
@@ -140,6 +141,11 @@ func PreRun(cmd *cobra.Command, _ []string) {
 
 // Run is the main execution flow of the command
 func Run(c *cobra.Command, names []string) {
+	// Cancelled on SIGINT/SIGTERM. Only used for work that is safe to abandon: a running update is
+	// deliberately detached from it (see runUpdatesWithNotifications) so containers are never left half-updated.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	filter, filterDesc := filters.BuildFilter(names, disableContainers, enableLabel, scope)
 	runOnce, _ := c.PersistentFlags().GetBool("run-once")
 	enableUpdateAPI, _ := c.PersistentFlags().GetBool("http-api-update")
@@ -161,21 +167,21 @@ func Run(c *cobra.Command, names []string) {
 		log.Fatal("Rolling restarts is not compatible with the global monitor only flag")
 	}
 
-	awaitDockerClient()
+	awaitDockerClient(ctx)
 
-	if err := actions.CheckForSanity(client, filter, rollingRestart); err != nil {
+	if err := actions.CheckForSanity(ctx, client, filter, rollingRestart); err != nil {
 		logNotifyExit(err)
 	}
 
 	if runOnce {
 		writeStartupMessage(c, time.Time{}, filterDesc)
-		runUpdatesWithNotifications(filter)
+		runUpdatesWithNotifications(ctx, filter)
 		notifier.Close()
 		os.Exit(0)
 		return
 	}
 
-	if err := actions.CheckForMultipleWatchtowerInstances(client, cleanup, scope); err != nil {
+	if err := actions.CheckForMultipleWatchtowerInstances(ctx, client, cleanup, scope); err != nil {
 		logNotifyExit(err)
 	}
 
@@ -184,13 +190,17 @@ func Run(c *cobra.Command, names []string) {
 	updateLock <- true
 
 	httpAPI := api.New(apiToken)
+	go func() {
+		<-ctx.Done()
+		httpAPI.Shutdown()
+	}()
 	httpAPI.Addr, _ = c.PersistentFlags().GetString("http-api-listen")
 	httpAPI.TLSCertFile, _ = c.PersistentFlags().GetString("http-api-tls-cert")
 	httpAPI.TLSKeyFile, _ = c.PersistentFlags().GetString("http-api-tls-key")
 
 	if enableUpdateAPI {
 		updateHandler := update.New(func(images []string) {
-			metric := runUpdatesWithNotifications(filters.FilterByImage(images, filter))
+			metric := runUpdatesWithNotifications(ctx, filters.FilterByImage(images, filter))
 			metrics.RegisterScan(metric)
 		}, updateLock)
 		httpAPI.RegisterFunc(updateHandler.Path, updateHandler.Handle)
@@ -206,12 +216,20 @@ func Run(c *cobra.Command, names []string) {
 		httpAPI.RegisterHandler(metricsHandler.Path, metricsHandler.Handle)
 	}
 
-	if err := httpAPI.Start(enableUpdateAPI && !unblockHTTPAPI); err != nil {
+	blockOnAPI := enableUpdateAPI && !unblockHTTPAPI
+	if err := httpAPI.Start(blockOnAPI); err != nil {
 		log.Fatalf("Failed to start the HTTP API: %v", err)
 	}
 
-	err := runUpgradesOnSchedule(c, filter, filterDesc, updateLock)
-	httpAPI.Shutdown()
+	if blockOnAPI {
+		// Start only returns here once the API was shut down, i.e. when a termination signal arrived.
+		// There is no scheduler to stop, but an update triggered through the API may still be running.
+		log.Info("Waiting for running update to be finished...")
+		<-updateLock
+		os.Exit(0)
+	}
+
+	err := runUpgradesOnSchedule(ctx, c, filter, filterDesc, updateLock)
 	if err != nil {
 		log.Error(err)
 		os.Exit(1)
@@ -226,9 +244,12 @@ func logNotifyExit(err error) {
 	os.Exit(1)
 }
 
-func awaitDockerClient() {
+func awaitDockerClient(ctx context.Context) {
 	log.Debug("Sleeping for a second to ensure the docker api client has been properly initialized.")
-	time.Sleep(1 * time.Second)
+	select {
+	case <-time.After(1 * time.Second):
+	case <-ctx.Done():
+	}
 }
 
 func formatDuration(d time.Duration) string {
@@ -319,20 +340,23 @@ func writeStartupMessage(c *cobra.Command, sched time.Time, filtering string) {
 	}
 }
 
-func runUpgradesOnSchedule(c *cobra.Command, filter t.Filter, filtering string, lock chan bool) error {
+func runUpgradesOnSchedule(ctx context.Context, c *cobra.Command, filter t.Filter, filtering string, lock chan bool) error {
 	if lock == nil {
 		lock = make(chan bool, 1)
 		lock <- true
 	}
 
-	scheduler := cron.New()
-	err := scheduler.AddFunc(
+	// Seconds are required, matching the six field format watchtower has always used
+	scheduler := cron.New(cron.WithParser(cron.NewParser(
+		cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+	)))
+	_, err := scheduler.AddFunc(
 		scheduleSpec,
 		func() {
 			select {
 			case v := <-lock:
 				defer func() { lock <- v }()
-				metric := runUpdatesWithNotifications(filter)
+				metric := runUpdatesWithNotifications(ctx, filter)
 				metrics.RegisterScan(metric)
 			default:
 				// Update was skipped
@@ -355,18 +379,17 @@ func runUpgradesOnSchedule(c *cobra.Command, filter t.Filter, filtering string, 
 	scheduler.Start()
 
 	// Graceful shut-down on SIGINT/SIGTERM
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-	signal.Notify(interrupt, syscall.SIGTERM)
-
-	<-interrupt
-	scheduler.Stop()
+	<-ctx.Done()
+	<-scheduler.Stop().Done()
 	log.Info("Waiting for running update to be finished...")
 	<-lock
 	return nil
 }
 
-func runUpdatesWithNotifications(filter t.Filter) *metrics.Metric {
+func runUpdatesWithNotifications(ctx context.Context, filter t.Filter) *metrics.Metric {
+	// An update must run to completion even if a shutdown is requested halfway through it
+	ctx = context.WithoutCancel(ctx)
+
 	notifier.StartNotification()
 	updateParams := t.UpdateParams{
 		Filter:          filter,
@@ -379,7 +402,7 @@ func runUpdatesWithNotifications(filter t.Filter) *metrics.Metric {
 		LabelPrecedence: labelPrecedence,
 		NoPull:          noPull,
 	}
-	result, err := actions.Update(client, updateParams)
+	result, err := actions.Update(ctx, client, updateParams)
 	if err != nil {
 		log.Error(err)
 	}

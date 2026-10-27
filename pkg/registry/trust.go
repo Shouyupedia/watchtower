@@ -90,7 +90,7 @@ func CredentialsStore(configFile configfile.ConfigFile) credentials.Store {
 
 // EncodeAuth Base64 encode an AuthConfig struct for transmission over HTTP
 func EncodeAuth(authConfig types.AuthConfig) (string, error) {
-	buf, err := json.Marshal(authConfig)
+	buf, err := json.Marshal(authConfig) //nolint:gosec // this is the wire format of the Docker X-Registry-Auth header
 	if err != nil {
 		return "", err
 	}

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -38,7 +39,10 @@ type API struct {
 
 	hasHandlers bool
 	mux         *http.ServeMux
-	server      *http.Server
+
+	mu       sync.Mutex // guards server and shutdown
+	server   *http.Server
+	shutdown bool
 }
 
 // New is a factory function creating a new API instance
@@ -100,7 +104,7 @@ func (api *API) Start(block bool) error {
 		addr = DefaultAddr
 	}
 
-	api.server = &http.Server{
+	server := &http.Server{
 		Addr:              addr,
 		Handler:           api.mux,
 		ReadHeaderTimeout: readHeaderTimeout,
@@ -116,6 +120,15 @@ func (api *API) Start(block bool) error {
 		return err
 	}
 
+	api.mu.Lock()
+	if api.shutdown {
+		api.mu.Unlock()
+		_ = listener.Close()
+		return nil
+	}
+	api.server = server
+	api.mu.Unlock()
+
 	if api.TLSCertFile == "" {
 		log.Warn("The HTTP API is served over plain HTTP. The API token is sent unencrypted, consider enabling TLS or placing it behind a TLS terminating proxy.")
 	}
@@ -123,9 +136,9 @@ func (api *API) Start(block bool) error {
 	serve := func() error {
 		var err error
 		if api.TLSCertFile != "" {
-			err = api.server.ServeTLS(listener, api.TLSCertFile, api.TLSKeyFile)
+			err = server.ServeTLS(listener, api.TLSCertFile, api.TLSKeyFile)
 		} else {
-			err = api.server.Serve(listener)
+			err = server.Serve(listener)
 		}
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
@@ -145,14 +158,20 @@ func (api *API) Start(block bool) error {
 	return nil
 }
 
-// Shutdown gracefully stops the API server, waiting for in-flight requests to finish
+// Shutdown gracefully stops the API server, waiting for in-flight requests to finish.
+// It is safe to call before Start, in which case the server will not start.
 func (api *API) Shutdown() {
-	if api.server == nil {
+	api.mu.Lock()
+	api.shutdown = true
+	server := api.server
+	api.mu.Unlock()
+
+	if server == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := api.server.Shutdown(ctx); err != nil {
+	if err := server.Shutdown(ctx); err != nil {
 		log.WithError(err).Warn("HTTP API did not shut down cleanly")
 	}
 }

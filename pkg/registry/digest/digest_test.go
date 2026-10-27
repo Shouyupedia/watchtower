@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	dockerTypes "github.com/docker/cli/cli/config/types"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/ghttp"
 	"github.com/shouyupedia/watchtower/internal/actions/mocks"
@@ -23,7 +23,7 @@ import (
 func TestDigest(t *testing.T) {
 
 	RegisterFailHandler(Fail)
-	RunSpecs(GinkgoT(), "Digest Suite")
+	RunSpecs(t, "Digest Suite")
 }
 
 var (

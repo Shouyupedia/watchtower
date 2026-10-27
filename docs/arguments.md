@@ -166,13 +166,13 @@ Environment Variable: DOCKER_HOST
 ```
 
 ## Docker API version
-The API version to use by the Docker client for connecting to the Docker daemon. The minimum supported version is 1.24.
+The API version to use by the Docker client for connecting to the Docker daemon. By default the version is negotiated with the daemon, so there is normally no reason to set this. Setting it pins the version and disables negotiation.
 
 ```text
             Argument: --api-version, -a
 Environment Variable: DOCKER_API_VERSION
                 Type: String
-             Default: "1.24"
+             Default: negotiated with the daemon
 ```
 
 ## Include restarting
@@ -409,7 +409,7 @@ Environment Variable: WATCHTOWER_HTTP_API_METRICS
 ```
 
 ## Scheduling
-[Cron expression](https://pkg.go.dev/github.com/robfig/cron@v1.2.0?tab=doc#hdr-CRON_Expression_Format) in 6 fields (rather than the traditional 5) which defines when and how often to check for new images. Either `--interval` or the schedule expression
+[Cron expression](https://pkg.go.dev/github.com/robfig/cron/v3#hdr-CRON_Expression_Format) in 6 fields (rather than the traditional 5) which defines when and how often to check for new images. Either `--interval` or the schedule expression
 can be defined, but not both. An example: `--schedule "0 0 4 * * *"`
 
 ```text

@@ -1,6 +1,7 @@
 package actions_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -9,7 +10,7 @@ import (
 	"github.com/shouyupedia/watchtower/internal/actions"
 	"github.com/shouyupedia/watchtower/pkg/types"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "github.com/shouyupedia/watchtower/internal/actions/mocks"
 )
@@ -31,7 +32,7 @@ var _ = Describe("the actions package", func() {
 					// removeVolumes:
 					false,
 				)
-				Expect(actions.CheckForMultipleWatchtowerInstances(client, false, "")).To(Succeed())
+				Expect(actions.CheckForMultipleWatchtowerInstances(context.Background(), client, false, "")).To(Succeed())
 			})
 		})
 		When("given an array of one", func() {
@@ -51,7 +52,7 @@ var _ = Describe("the actions package", func() {
 					// removeVolumes:
 					false,
 				)
-				Expect(actions.CheckForMultipleWatchtowerInstances(client, false, "")).To(Succeed())
+				Expect(actions.CheckForMultipleWatchtowerInstances(context.Background(), client, false, "")).To(Succeed())
 			})
 		})
 		When("given multiple containers", func() {
@@ -81,7 +82,7 @@ var _ = Describe("the actions package", func() {
 			})
 
 			It("should stop all but the latest one", func() {
-				err := actions.CheckForMultipleWatchtowerInstances(client, false, "")
+				err := actions.CheckForMultipleWatchtowerInstances(context.Background(), client, false, "")
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -110,12 +111,12 @@ var _ = Describe("the actions package", func() {
 				)
 			})
 			It("should try to delete the image if the cleanup flag is true", func() {
-				err := actions.CheckForMultipleWatchtowerInstances(client, true, "")
+				err := actions.CheckForMultipleWatchtowerInstances(context.Background(), client, true, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImage()).To(BeTrue())
 			})
 			It("should not try to delete the image if the cleanup flag is false", func() {
-				err := actions.CheckForMultipleWatchtowerInstances(client, false, "")
+				err := actions.CheckForMultipleWatchtowerInstances(context.Background(), client, false, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(client.TestData.TriedToRemoveImage()).To(BeFalse())
 			})

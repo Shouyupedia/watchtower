@@ -1,6 +1,7 @@
 package lifecycle_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -15,7 +16,7 @@ type failingClient struct {
 	container.Client
 }
 
-func (failingClient) GetContainer(t.ContainerID) (t.Container, error) {
+func (failingClient) GetContainer(context.Context, t.ContainerID) (t.Container, error) {
 	// Real clients return a nil container together with the error
 	return nil, errors.New("no such container")
 }
@@ -27,5 +28,5 @@ func TestExecutePostUpdateCommandSurvivesLookupFailure(testing *testing.T) {
 		}
 	}()
 
-	lifecycle.ExecutePostUpdateCommand(failingClient{}, "abcdef")
+	lifecycle.ExecutePostUpdateCommand(context.Background(), failingClient{}, "abcdef")
 }

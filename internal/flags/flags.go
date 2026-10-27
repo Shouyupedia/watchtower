@@ -15,10 +15,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// DockerAPIMinVersion is the minimum version of the docker api required to
-// use watchtower
-const DockerAPIMinVersion string = "1.25"
-
 var defaultInterval = int((time.Hour * 24).Seconds())
 
 // RegisterDockerFlags that are used directly by the docker api client
@@ -434,7 +430,6 @@ func envDuration(key string) time.Duration {
 func SetDefaults() {
 	viper.AutomaticEnv()
 	viper.SetDefault("DOCKER_HOST", "unix:///var/run/docker.sock")
-	viper.SetDefault("DOCKER_API_VERSION", DockerAPIMinVersion)
 	viper.SetDefault("WATCHTOWER_HTTP_API_LISTEN", ":8080")
 	viper.SetDefault("WATCHTOWER_POLL_INTERVAL", defaultInterval)
 	viper.SetDefault("WATCHTOWER_TIMEOUT", time.Second*10)
@@ -592,7 +587,7 @@ func isFile(s string) bool {
 		// This still allows for paths that start with 'c:\' etc.
 		return false
 	}
-	_, err := os.Stat(s)
+	_, err := os.Stat(s) //nolint:gosec // paths come from operator supplied flags
 	return !errors.Is(err, os.ErrNotExist)
 }
 

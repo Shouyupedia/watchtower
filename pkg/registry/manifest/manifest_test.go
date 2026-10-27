@@ -1,14 +1,13 @@
 package manifest_test
 
 import (
-	"testing"
-	"time"
-
-	apiTypes "github.com/docker/docker/api/types"
-	. "github.com/onsi/ginkgo"
+	dockerimage "github.com/docker/docker/api/types/image"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/shouyupedia/watchtower/internal/actions/mocks"
 	"github.com/shouyupedia/watchtower/pkg/registry/manifest"
+	"testing"
+	"time"
 )
 
 func TestManifest(t *testing.T) {
@@ -60,7 +59,7 @@ var _ = Describe("the manifest module", func() {
 })
 
 func buildMockContainerManifestURL(imageRef string) (string, error) {
-	imageInfo := apiTypes.ImageInspect{
+	imageInfo := dockerimage.InspectResponse{
 		RepoTags: []string{
 			imageRef,
 		},

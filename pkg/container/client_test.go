@@ -1,23 +1,22 @@
 package container
 
 import (
+	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
+	"github.com/docker/docker/api/types/backend"
+	cli "github.com/docker/docker/client"
+	"github.com/onsi/gomega/gbytes"
+	"github.com/onsi/gomega/ghttp"
 	"github.com/shouyupedia/watchtower/internal/util"
 	"github.com/shouyupedia/watchtower/pkg/container/mocks"
 	"github.com/shouyupedia/watchtower/pkg/filters"
 	t "github.com/shouyupedia/watchtower/pkg/types"
-
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/backend"
-	cli "github.com/docker/docker/client"
-	"github.com/docker/docker/errdefs"
-	"github.com/onsi/gomega/gbytes"
-	"github.com/onsi/gomega/ghttp"
 	"github.com/sirupsen/logrus"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	gt "github.com/onsi/gomega/types"
 
@@ -78,8 +77,8 @@ var _ = Describe("the client", func() {
 	When("removing a running container", func() {
 		When("the container still exist after stopping", func() {
 			It("should attempt to remove the container", func() {
-				container := MockContainer(WithContainerState(types.ContainerState{Running: true}))
-				containerStopped := MockContainer(WithContainerState(types.ContainerState{Running: false}))
+				container := MockContainer(WithContainerState(dockercontainer.State{Running: true}))
+				containerStopped := MockContainer(WithContainerState(dockercontainer.State{Running: false}))
 
 				cid := container.ContainerInfo().ID
 				mockServer.AppendHandlers(
@@ -89,12 +88,12 @@ var _ = Describe("the client", func() {
 					mocks.GetContainerHandler(cid, nil),
 				)
 
-				Expect(dockerClient{api: docker}.StopContainer(container, time.Minute)).To(Succeed())
+				Expect(dockerClient{api: docker}.StopContainer(context.Background(), container, time.Minute)).To(Succeed())
 			})
 		})
 		When("the container does not exist after stopping", func() {
 			It("should not cause an error", func() {
-				container := MockContainer(WithContainerState(types.ContainerState{Running: true}))
+				container := MockContainer(WithContainerState(dockercontainer.State{Running: true}))
 
 				cid := container.ContainerInfo().ID
 				mockServer.AppendHandlers(
@@ -103,7 +102,7 @@ var _ = Describe("the client", func() {
 					mocks.RemoveContainerHandler(cid, mocks.Missing),
 				)
 
-				Expect(dockerClient{api: docker}.StopContainer(container, time.Minute)).To(Succeed())
+				Expect(dockerClient{api: docker}.StopContainer(context.Background(), container, time.Minute)).To(Succeed())
 			})
 		})
 	})
@@ -119,7 +118,7 @@ var _ = Describe("the client", func() {
 				resetLogrus, logbuf := captureLogrus(logrus.DebugLevel)
 				defer resetLogrus()
 
-				Expect(c.RemoveImageByID(t.ImageID(imageA))).To(Succeed())
+				Expect(c.RemoveImageByID(context.Background(), t.ImageID(imageA))).To(Succeed())
 
 				shortA := t.ImageID(imageA).ShortID()
 				shortAParent := t.ImageID(imageAParent).ShortID()
@@ -133,8 +132,8 @@ var _ = Describe("the client", func() {
 				mockServer.AppendHandlers(mocks.RemoveImageHandler(nil))
 				c := dockerClient{api: docker}
 
-				err := c.RemoveImageByID(t.ImageID(image))
-				Expect(errdefs.IsNotFound(err)).To(BeTrue())
+				err := c.RemoveImageByID(context.Background(), t.ImageID(image))
+				Expect(cerrdefs.IsNotFound(err)).To(BeTrue())
 			})
 		})
 	})
@@ -147,7 +146,7 @@ var _ = Describe("the client", func() {
 					api:           docker,
 					ClientOptions: ClientOptions{},
 				}
-				containers, err := client.ListContainers(filters.NoFilter)
+				containers, err := client.ListContainers(context.Background(), filters.NoFilter)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(containers).To(HaveLen(2))
 			})
@@ -161,7 +160,7 @@ var _ = Describe("the client", func() {
 					api:           docker,
 					ClientOptions: ClientOptions{},
 				}
-				containers, err := client.ListContainers(filter)
+				containers, err := client.ListContainers(context.Background(), filter)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(containers).To(BeEmpty())
 			})
@@ -174,7 +173,7 @@ var _ = Describe("the client", func() {
 					api:           docker,
 					ClientOptions: ClientOptions{},
 				}
-				containers, err := client.ListContainers(filters.WatchtowerContainersFilter)
+				containers, err := client.ListContainers(context.Background(), filters.WatchtowerContainersFilter)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(containers).To(ConsistOf(withContainerImageName(Equal("containrrr/watchtower:latest"))))
 			})
@@ -187,7 +186,7 @@ var _ = Describe("the client", func() {
 					api:           docker,
 					ClientOptions: ClientOptions{IncludeStopped: true},
 				}
-				containers, err := client.ListContainers(filters.NoFilter)
+				containers, err := client.ListContainers(context.Background(), filters.NoFilter)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(containers).To(ContainElement(havingRunningState(false)))
 			})
@@ -200,7 +199,7 @@ var _ = Describe("the client", func() {
 					api:           docker,
 					ClientOptions: ClientOptions{IncludeRestarting: true},
 				}
-				containers, err := client.ListContainers(filters.NoFilter)
+				containers, err := client.ListContainers(context.Background(), filters.NoFilter)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(containers).To(ContainElement(havingRestartingState(true)))
 			})
@@ -213,7 +212,7 @@ var _ = Describe("the client", func() {
 					api:           docker,
 					ClientOptions: ClientOptions{IncludeRestarting: false},
 				}
-				containers, err := client.ListContainers(filters.NoFilter)
+				containers, err := client.ListContainers(context.Background(), filters.NoFilter)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(containers).NotTo(ContainElement(havingRestartingState(true)))
 			})
@@ -227,7 +226,7 @@ var _ = Describe("the client", func() {
 						api:           docker,
 						ClientOptions: ClientOptions{},
 					}
-					container, err := client.GetContainer(consumerContainerRef.ContainerID())
+					container, err := client.GetContainer(context.Background(), consumerContainerRef.ContainerID())
 					Expect(err).NotTo(HaveOccurred())
 					networkMode := container.ContainerInfo().HostConfig.NetworkMode
 					Expect(networkMode.ConnectedContainer()).To(Equal(mocks.NetSupplierContainerName))
@@ -241,7 +240,7 @@ var _ = Describe("the client", func() {
 						api:           docker,
 						ClientOptions: ClientOptions{},
 					}
-					container, err := client.GetContainer(consumerContainerRef.ContainerID())
+					container, err := client.GetContainer(context.Background(), consumerContainerRef.ContainerID())
 					Expect(err).NotTo(HaveOccurred())
 					networkMode := container.ContainerInfo().HostConfig.NetworkMode
 					Expect(networkMode.ConnectedContainer()).To(Equal(mocks.NetSupplierNotFoundID))
@@ -270,22 +269,21 @@ var _ = Describe("the client", func() {
 					// API.ContainerExecCreate
 					ghttp.CombineHandlers(
 						ghttp.VerifyRequest("POST", HaveSuffix("containers/%v/exec", containerID)),
-						ghttp.VerifyJSONRepresenting(types.ExecConfig{
-							User:   user,
-							Detach: false,
-							Tty:    true,
+						ghttp.VerifyJSONRepresenting(dockercontainer.ExecOptions{
+							User: user,
+							Tty:  true,
 							Cmd: []string{
 								"sh",
 								"-c",
 								cmd,
 							},
 						}),
-						ghttp.RespondWithJSONEncoded(http.StatusOK, types.IDResponse{ID: execID}),
+						ghttp.RespondWithJSONEncoded(http.StatusOK, dockercontainer.ExecCreateResponse{ID: execID}),
 					),
 					// API.ContainerExecStart
 					ghttp.CombineHandlers(
 						ghttp.VerifyRequest("POST", HaveSuffix("exec/%v/start", execID)),
-						ghttp.VerifyJSONRepresenting(types.ExecStartCheck{
+						ghttp.VerifyJSONRepresenting(dockercontainer.ExecStartOptions{
 							Detach: false,
 							Tty:    true,
 						}),
@@ -308,7 +306,7 @@ var _ = Describe("the client", func() {
 					),
 				)
 
-				_, err := client.ExecuteCommand(containerID, cmd, 1)
+				_, err := client.ExecuteCommand(context.Background(), containerID, cmd, 1)
 				Expect(err).NotTo(HaveOccurred())
 				// Note: Since Execute requires opening up a raw TCP stream to the daemon for the output, this will fail
 				// when using the mock API server. Regardless of the outcome, the log should include the container ID
@@ -329,7 +327,7 @@ var _ = Describe("the client", func() {
 				endpoints := map[string]*network.EndpointSettings{
 					`test`: {Aliases: aliases},
 				}
-				container.containerInfo.NetworkSettings = &types.NetworkSettings{Networks: endpoints}
+				container.containerInfo.NetworkSettings = &dockercontainer.NetworkSettings{Networks: endpoints}
 				Expect(container.ContainerInfo().NetworkSettings.Networks[`test`].Aliases).To(Equal(aliases))
 				Expect(client.GetNetworkConfig(container).EndpointsConfig[`test`].Aliases).To(Equal([]string{"One", "Two", "Four"}))
 			})

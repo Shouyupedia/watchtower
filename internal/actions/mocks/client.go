@@ -1,6 +1,7 @@
 package mocks
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -38,12 +39,12 @@ func CreateMockClient(data *TestData, pullImages bool, removeVolumes bool) MockC
 }
 
 // ListContainers is a mock method returning the provided container testdata
-func (client MockClient) ListContainers(_ t.Filter) ([]t.Container, error) {
+func (client MockClient) ListContainers(_ context.Context, _ t.Filter) ([]t.Container, error) {
 	return client.TestData.Containers, nil
 }
 
 // StopContainer is a mock method
-func (client MockClient) StopContainer(c t.Container, _ time.Duration) error {
+func (client MockClient) StopContainer(_ context.Context, c t.Container, _ time.Duration) error {
 	if c.Name() == client.TestData.NameOfContainerToKeep {
 		return errors.New("tried to stop the instance we want to keep")
 	}
@@ -51,28 +52,28 @@ func (client MockClient) StopContainer(c t.Container, _ time.Duration) error {
 }
 
 // StartContainer is a mock method
-func (client MockClient) StartContainer(_ t.Container) (t.ContainerID, error) {
+func (client MockClient) StartContainer(_ context.Context, _ t.Container) (t.ContainerID, error) {
 	return "", nil
 }
 
 // RenameContainer is a mock method
-func (client MockClient) RenameContainer(_ t.Container, _ string) error {
+func (client MockClient) RenameContainer(_ context.Context, _ t.Container, _ string) error {
 	return nil
 }
 
 // RemoveImageByID increments the TriedToRemoveImageCount on being called
-func (client MockClient) RemoveImageByID(_ t.ImageID) error {
+func (client MockClient) RemoveImageByID(_ context.Context, _ t.ImageID) error {
 	client.TestData.TriedToRemoveImageCount++
 	return nil
 }
 
 // GetContainer is a mock method
-func (client MockClient) GetContainer(_ t.ContainerID) (t.Container, error) {
+func (client MockClient) GetContainer(_ context.Context, _ t.ContainerID) (t.Container, error) {
 	return client.TestData.Containers[0], nil
 }
 
 // ExecuteCommand is a mock method
-func (client MockClient) ExecuteCommand(_ t.ContainerID, command string, _ int) (SkipUpdate bool, err error) {
+func (client MockClient) ExecuteCommand(_ context.Context, _ t.ContainerID, command string, _ int) (SkipUpdate bool, err error) {
 	switch command {
 	case "/PreUpdateReturn0.sh":
 		return false, nil
@@ -86,7 +87,7 @@ func (client MockClient) ExecuteCommand(_ t.ContainerID, command string, _ int) 
 }
 
 // IsContainerStale is true if not explicitly stated in TestData for the mock client
-func (client MockClient) IsContainerStale(cont t.Container, params t.UpdateParams) (bool, t.ImageID, error) {
+func (client MockClient) IsContainerStale(_ context.Context, cont t.Container, params t.UpdateParams) (bool, t.ImageID, error) {
 	stale, found := client.TestData.Staleness[cont.Name()]
 	if !found {
 		stale = true

@@ -17,7 +17,7 @@ import (
 	"github.com/shouyupedia/watchtower/pkg/registry/httpclient"
 
 	ref "github.com/distribution/reference"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	wtTypes "github.com/shouyupedia/watchtower/pkg/types"
 )
