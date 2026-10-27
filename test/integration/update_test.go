@@ -295,7 +295,7 @@ func TestInterruptedUpdateIsRecovered(t *testing.T) {
 	e.release("v1")
 	id := e.leftBehind("app", time.Hour, "ur") // was running, restart policy unless-stopped
 
-	e.mustUpdate([]string{"unrelated"}, "--update-strategy", "replace")
+	e.mustUpdate([]string{"app"}, "--update-strategy", "replace")
 
 	if got := e.inspect("app", "{{.Id}}"); got != id {
 		t.Fatalf("the backup was not restored: %s", got)
@@ -312,7 +312,7 @@ func TestRecentBackupsAreLeftAlone(t *testing.T) {
 	e.release("v1")
 	e.leftBehind("app", time.Minute, "nr")
 
-	e.mustUpdate([]string{"unrelated"}, "--update-strategy", "replace")
+	e.mustUpdate([]string{"app"}, "--update-strategy", "replace")
 
 	if e.exists(e.name("app")) {
 		t.Error("a backup that may belong to an update in progress must not be touched")
@@ -329,12 +329,59 @@ func TestBackupIsRemovedWhenItsReplacementRuns(t *testing.T) {
 	e.leftBehind("app", time.Hour, "nr")
 	e.run("app", "--network", "none", e.image("latest"))
 
-	e.mustUpdate([]string{"unrelated"}, "--update-strategy", "replace")
+	e.mustUpdate([]string{"app"}, "--update-strategy", "replace")
 
 	if len(e.leftovers()) != 0 {
 		t.Errorf("the backup should have been removed: %v", e.leftovers())
 	}
 	if got := e.inspect("app", "{{.State.Running}}"); got != "true" {
 		t.Errorf("the replacement must be left running")
+	}
+}
+
+func TestRecoveryOnlyTouchesContainersInScope(t *testing.T) {
+	e := newEnv(t)
+	e.buildImage("v1", "ENV VERSION=1")
+	e.release("v1")
+	e.leftBehind("app", time.Hour, "nr")
+
+	// Another instance, watching other containers, must not restore it
+	e.mustUpdate([]string{"unrelated"}, "--update-strategy", "replace")
+
+	if e.exists(e.name("app")) {
+		t.Fatal("a backup outside the containers this instance watches was restored")
+	}
+	if len(e.leftovers()) != 1 {
+		t.Fatalf("expected the backup to be left alone, got %v", e.leftovers())
+	}
+
+	// The instance that does watch it does restore it
+	e.mustUpdate([]string{"app"}, "--update-strategy", "replace")
+	if !e.exists(e.name("app")) {
+		t.Fatal("the backup was not restored by the instance watching it")
+	}
+}
+
+func TestReplaceUpdatesAContainerThatIgnoresItsStopSignal(t *testing.T) {
+	e := newEnv(t)
+	e.buildImage("v1", "ENV VERSION=1", "ENV MODE=stubborn")
+	v2 := e.buildImage("v2", "ENV VERSION=2")
+	e.release("v1")
+	e.run("app", "--network", "none", e.image("latest"))
+	e.waitFor("the stubborn container to keep running", func() bool { return e.inspect("app", "{{.State.Running}}") == "true" })
+	time.Sleep(time.Second)
+	if e.inspect("app", "{{.State.Running}}") != "true" {
+		t.Fatal("the test container exited by itself, the test would prove nothing")
+	}
+	e.release("v2")
+
+	out := e.mustUpdate([]string{"app"}, "--update-strategy", "replace", "--stop-timeout", "2s")
+	if !strings.Contains(out, "killing it") {
+		t.Errorf("expected the container to be killed after ignoring SIGTERM")
+	}
+
+	e.requireRunningImage("app", v2)
+	if left := e.leftovers(); len(left) != 0 {
+		t.Errorf("leftovers: %v", left)
 	}
 }

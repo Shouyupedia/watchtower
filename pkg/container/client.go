@@ -67,7 +67,7 @@ type Client interface {
 	RemoveBackup(context.Context, t.ContainerBackup) error
 	DiscardContainer(context.Context, t.ContainerID) error
 	WaitUntilHealthy(ctx context.Context, id t.ContainerID, timeout time.Duration) error
-	RecoverBackups(context.Context) error
+	RecoverBackups(context.Context, t.Filter) error
 }
 
 // NewClient returns a new Client instance which can be used to interact with

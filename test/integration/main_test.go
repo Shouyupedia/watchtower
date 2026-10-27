@@ -43,6 +43,12 @@ func main() {
 	case "slowcrash":
 		time.Sleep(2 * time.Second)
 		os.Exit(4)
+	case "stubborn":
+		// ignores SIGTERM, so only SIGKILL stops it
+		signal.Ignore(syscall.SIGTERM)
+		for {
+			time.Sleep(time.Hour)
+		}
 	}
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGTERM, syscall.SIGINT)

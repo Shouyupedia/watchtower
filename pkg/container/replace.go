@@ -31,6 +31,9 @@ const (
 	healthPollInterval = time.Second
 )
 
+// killWait is how long a container gets to stop after SIGKILL, when it ignored its stop signal for the stop timeout
+var killWait = 10 * time.Second
+
 // A backup is named <original name>_wt-prev-<unix time>-<policy><state>. The restart policy and whether
 // the container was running are part of the name, as that is the only place to keep them that survives
 // watchtower being interrupted: neither labels nor anything else can be added to an existing container.
@@ -141,19 +144,28 @@ func (client dockerClient) StopAndPreserve(ctx context.Context, c t.Container, t
 			return t.ContainerBackup{}, err
 		}
 
-		_ = client.waitForStopOrTimeout(ctx, c, timeout)
-		inspectCtx, cancel := callCtx(ctx)
-		state, err := client.api.ContainerInspect(inspectCtx, idStr)
-		cancel()
+		running, err := client.stopsWithin(ctx, c, timeout)
+		if err == nil && running {
+			// Like docker stop (and the recreate strategy, which force removes it), do not take no for an answer
+			log.Infof("%s (%s) did not stop within %v, killing it", c.Name(), shortID, timeout)
+			killCtx, cancel := callCtx(ctx)
+			err = client.api.ContainerKill(killCtx, idStr, "SIGKILL")
+			cancel()
+			if err == nil {
+				running, err = client.stopsWithin(ctx, c, killWait)
+			}
+		}
 		if err != nil {
+			// The container may or may not have stopped; make sure it is back the way it was
+			undo()
 			return t.ContainerBackup{}, err
 		}
-		if state.State != nil && state.State.Running {
+		if running {
 			// Nothing but the restart policy has been touched, and the container is still doing its job
 			if changedPolicy {
 				_ = client.setRestartPolicy(context.WithoutCancel(ctx), idStr, policy)
 			}
-			return t.ContainerBackup{}, fmt.Errorf("container %s (%s) did not stop within %v", c.Name(), shortID, timeout)
+			return t.ContainerBackup{}, fmt.Errorf("container %s (%s) could not be stopped", c.Name(), shortID)
 		}
 	}
 
@@ -166,6 +178,18 @@ func (client dockerClient) StopAndPreserve(ctx context.Context, c t.Container, t
 	}
 
 	return backup, nil
+}
+
+// stopsWithin waits for the container to stop, and returns whether it is still running after the timeout
+func (client dockerClient) stopsWithin(ctx context.Context, c t.Container, timeout time.Duration) (running bool, err error) {
+	_ = client.waitForStopOrTimeout(ctx, c, timeout)
+	inspectCtx, cancel := callCtx(ctx)
+	defer cancel()
+	state, err := client.api.ContainerInspect(inspectCtx, string(c.ID()))
+	if err != nil {
+		return false, err
+	}
+	return state.State != nil && state.State.Running, nil
 }
 
 // RestoreContainer puts a container preserved by StopAndPreserve back under its own name, and starts it if it was running
@@ -268,7 +292,10 @@ func (client dockerClient) WaitUntilHealthy(ctx context.Context, id t.ContainerI
 // RecoverBackups deals with containers that were set aside by an update that never finished, for example
 // because watchtower was killed halfway: the previous version is put back if nothing took its place, and
 // removed if its replacement is running. Anything unclear is left alone and reported.
-func (client dockerClient) RecoverBackups(ctx context.Context) error {
+//
+// Only backups of containers that the filter selects are considered, so that an instance never touches
+// containers outside of its scope, its enable label or the names it was given.
+func (client dockerClient) RecoverBackups(ctx context.Context, filter t.Filter) error {
 	listCtx, cancel := callCtx(ctx)
 	defer cancel()
 	list, err := client.api.ContainerList(listCtx, container.ListOptions{
@@ -291,6 +318,20 @@ func (client dockerClient) RecoverBackups(ctx context.Context) error {
 
 		created, _ := strconv.ParseInt(match[2], 10, 64)
 		if time.Since(time.Unix(created, 0)) < minBackupAge {
+			continue
+		}
+
+		// The backup carries the labels of the original container, so the filter applies to it as it would
+		// have to the original, as long as it is judged by the original name
+		inspected, err := client.getContainer(ctx, t.ContainerID(summary.ID), nil)
+		if err != nil {
+			log.WithError(err).Debugf("Could not inspect the backup %s", name)
+			continue
+		}
+		if c, ok := inspected.(*Container); ok && c.containerInfo != nil {
+			c.containerInfo.Name = "/" + match[1]
+		}
+		if !filter(inspected) {
 			continue
 		}
 

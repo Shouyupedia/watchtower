@@ -11,7 +11,9 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	sdkClient "github.com/docker/docker/client"
+	"github.com/shouyupedia/watchtower/pkg/filters"
 	t "github.com/shouyupedia/watchtower/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -89,12 +91,21 @@ func (r *replaceAPI) ContainerList(_ context.Context, opts container.ListOptions
 	return r.list, nil
 }
 
+func (r *replaceAPI) ImageInspect(context.Context, string, ...sdkClient.ImageInspectOption) (image.InspectResponse, error) {
+	return image.InspectResponse{}, cerrdefs.ErrNotFound
+}
+
 func (r *replaceAPI) running(id string, running bool) {
+	r.withState(id, running, nil)
+}
+
+func (r *replaceAPI) withState(id string, running bool, labels map[string]string) {
 	if r.states == nil {
 		r.states = map[string]container.InspectResponse{}
 	}
 	r.states[id] = container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{ID: id, State: &container.State{Running: running}},
+		ContainerJSONBase: &container.ContainerJSONBase{ID: id, Name: "/" + id, State: &container.State{Running: running}, HostConfig: &container.HostConfig{}},
+		Config:            &container.Config{Labels: labels},
 	}
 }
 
@@ -157,15 +168,23 @@ func TestStopAndPreserveRefusesContainersTheDaemonRemoves(t *testing.T) {
 	assert.Empty(t, api.operations())
 }
 
+func shortKillWait(t *testing.T) {
+	previous := killWait
+	killWait = 50 * time.Millisecond
+	t.Cleanup(func() { killWait = previous })
+}
+
 func TestStopAndPreserveLeavesARunningContainerAlone(t *testing.T) {
-	api := &replaceAPI{stopsOnKill: false} // the container ignores the signal
+	shortKillWait(t)
+	api := &replaceAPI{stopsOnKill: false} // the container cannot be stopped at all
 	c := preservableContainer(container.RestartPolicy{Name: container.RestartPolicyUnlessStopped}, true)
 	api.running(string(c.ID()), true)
 
 	_, err := dockerClient{api: api}.StopAndPreserve(context.Background(), c, 50*time.Millisecond)
 
-	require.ErrorContains(t, err, "did not stop")
+	require.ErrorContains(t, err, "could not be stopped")
 	ops := api.operations()
+	assert.Contains(t, ops, "kill:container_id:SIGKILL", "a container ignoring its stop signal is killed, like docker stop does")
 	assert.Equal(t, "policy:container_id:unless-stopped", ops[len(ops)-1], "the restart policy has to be put back")
 	for _, op := range ops {
 		assert.False(t, strings.HasPrefix(op, "rename:"), "a container that is still running must keep its name")
@@ -287,27 +306,70 @@ func TestRecoverBackups(t *testing.T) {
 
 	t.Run("restores a container nothing replaced", func(t *testing.T) {
 		api := &replaceAPI{list: []container.Summary{summaryFor("b1", "web", old, "a", true)}}
+		api.withState("b1", false, nil)
 
-		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background()))
+		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background(), filters.NoFilter))
 
 		assert.Equal(t, []string{"list:all=true", "rename:b1:web", "policy:b1:always", "start:b1"}, api.operations())
 	})
 
 	t.Run("removes the backup once the replacement runs", func(t *testing.T) {
 		api := &replaceAPI{list: []container.Summary{summaryFor("b1", "web", old, "n", true)}}
+		api.withState("b1", false, nil)
 		api.running("web", true)
 
-		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background()))
+		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background(), filters.NoFilter))
 
-		assert.Equal(t, []string{"list:all=true", "remove:b1:volumes=false"}, api.operations(),
-			"volumes are never removed for a backup found at start-up, as it is not known what the replacement shares with it")
+		assert.Equal(t, []string{"list:all=true", "remove:b1:volumes=false"}, api.operations())
+	})
+
+	t.Run("removes volumes of the backup like a successful update would, when asked to", func(t *testing.T) {
+		api := &replaceAPI{list: []container.Summary{summaryFor("b1", "web", old, "n", true)}}
+		api.withState("b1", false, nil)
+		api.running("web", true)
+		client := dockerClient{api: api, ClientOptions: ClientOptions{RemoveVolumes: true}}
+
+		require.NoError(t, client.RecoverBackups(context.Background(), filters.NoFilter))
+
+		assert.Equal(t, []string{"list:all=true", "remove:b1:volumes=true"}, api.operations())
+	})
+
+	t.Run("only touches containers the filter selects", func(t *testing.T) {
+		api := &replaceAPI{list: []container.Summary{
+			summaryFor("b1", "web", old, "n", true),
+			summaryFor("b2", "db", old, "n", true),
+		}}
+		api.withState("b1", false, map[string]string{"com.centurylinklabs.watchtower.scope": "other"})
+		api.withState("b2", false, map[string]string{"com.centurylinklabs.watchtower.scope": "mine"})
+
+		filter, _ := filters.BuildFilter(nil, nil, false, "mine")
+		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background(), filter))
+
+		assert.Equal(t, []string{"list:all=true", "rename:b2:db", "start:b2"}, api.operations(),
+			"the backup of another instance's container must be left alone")
+	})
+
+	t.Run("judges a backup by its original name", func(t *testing.T) {
+		api := &replaceAPI{list: []container.Summary{summaryFor("b1", "web", old, "n", true)}}
+		api.withState("b1", false, nil)
+
+		byName := filters.FilterByNames([]string{"web"}, filters.NoFilter)
+		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background(), byName))
+		assert.Equal(t, []string{"list:all=true", "rename:b1:web", "start:b1"}, api.operations())
+
+		api = &replaceAPI{list: []container.Summary{summaryFor("b1", "web", old, "n", true)}}
+		api.withState("b1", false, nil)
+		other := filters.FilterByNames([]string{"other"}, filters.NoFilter)
+		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background(), other))
+		assert.Equal(t, []string{"list:all=true"}, api.operations())
 	})
 
 	t.Run("leaves both alone if the replacement is not running", func(t *testing.T) {
 		api := &replaceAPI{list: []container.Summary{summaryFor("b1", "web", old, "n", true)}}
+		api.withState("b1", false, nil)
 		api.running("web", false)
 
-		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background()))
+		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background(), filters.NoFilter))
 
 		assert.Equal(t, []string{"list:all=true"}, api.operations())
 	})
@@ -315,7 +377,7 @@ func TestRecoverBackups(t *testing.T) {
 	t.Run("ignores backups of updates that may still be running", func(t *testing.T) {
 		api := &replaceAPI{list: []container.Summary{summaryFor("b1", "web", time.Minute, "n", true)}}
 
-		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background()))
+		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background(), filters.NoFilter))
 
 		assert.Equal(t, []string{"list:all=true"}, api.operations())
 	})
@@ -327,8 +389,55 @@ func TestRecoverBackups(t *testing.T) {
 			{ID: "x3"},
 		}}
 
-		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background()))
+		require.NoError(t, dockerClient{api: api}.RecoverBackups(context.Background(), filters.NoFilter))
 
 		assert.Equal(t, []string{"list:all=true"}, api.operations())
 	})
+}
+
+func TestStopAndPreserveKillsAContainerThatIgnoresItsStopSignal(t *testing.T) {
+	shortKillWait(t)
+	api := &stubbornAPI{replaceAPI: replaceAPI{}}
+	c := preservableContainer(container.RestartPolicy{}, true)
+	api.running(string(c.ID()), true)
+
+	backup, err := dockerClient{api: api}.StopAndPreserve(context.Background(), c, 50*time.Millisecond)
+
+	require.NoError(t, err)
+	ops := api.operations()
+	assert.Equal(t, "kill:container_id:SIGTERM", ops[0])
+	assert.Equal(t, "kill:container_id:SIGKILL", ops[1])
+	assert.True(t, strings.HasPrefix(ops[2], "rename:"), ops)
+	assert.True(t, backup.WasRunning)
+}
+
+// stubbornAPI is a container that ignores SIGTERM but not SIGKILL
+type stubbornAPI struct {
+	replaceAPI
+}
+
+func (s *stubbornAPI) ContainerKill(ctx context.Context, id, signal string) error {
+	s.record("kill:%s:%s", id, signal)
+	if signal == "SIGKILL" {
+		s.mu.Lock()
+		s.states[id].State.Running = false
+		s.mu.Unlock()
+	}
+	return nil
+}
+
+func TestStopAndPreserveRestoresTheContainerIfItsStateCannotBeChecked(t *testing.T) {
+	// The container disappears from the daemon's view after the kill: whatever happened, the restart policy
+	// has to be put back and an attempt made to start it again, rather than leaving it stopped and unmanaged
+	api := &replaceAPI{}
+	c := preservableContainer(container.RestartPolicy{Name: container.RestartPolicyAlways}, true)
+
+	_, err := dockerClient{api: api}.StopAndPreserve(context.Background(), c, 50*time.Millisecond)
+
+	require.Error(t, err)
+	ops := api.operations()
+	assert.Equal(t, []string{"policy:container_id:always", "start:container_id"}, ops[len(ops)-2:])
+	for _, op := range ops {
+		assert.False(t, strings.HasPrefix(op, "rename:"), ops)
+	}
 }

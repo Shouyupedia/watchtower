@@ -480,7 +480,9 @@ How a container is replaced when a new image is found.
 -   `recreate` (default): the old container is removed first, then the new one is created. If the new one cannot be created or started, the container is gone (see `--rollback-on-failure`).
 -   `replace`: the old container is stopped and renamed (`<name>_wt-prev-<time>-<policy><state>`), the new container is created under the original name, and only when it has started (and, if `--rollback-health-timeout` is set, proven that it works) the old one is removed. Otherwise the new container is removed and the old one is put back and started again, with its restart policy restored. The old container's restart policy is turned off while it is set aside, so the daemon does not bring it back by itself.
 
-With `replace`, containers set aside by a watchtower that was interrupted (older than 10 minutes) are dealt with at the start of the next update: restored if nothing took their place, removed if their replacement is running, and left alone, with a warning, if the replacement is not running.
+A container that does not stop within the stop timeout is killed (SIGKILL), as `docker stop` would, and as `recreate` effectively does by force removing it.
+
+With `replace`, containers set aside by a watchtower that was interrupted (older than 10 minutes) are dealt with at the start of the next update: restored if nothing took their place, removed if their replacement is running, and left alone, with a warning, if the replacement is not running. Only backups of containers that the instance watches (its scope, enable label and container names) are considered, so instances never touch each other's containers.
 
 Containers that the daemon removes by itself when they stop (`--rm`), and the watchtower container itself, use `recreate` regardless. The old container is renamed, since a name can only be used once, and it is stopped before the new one is created, so published ports and similar resources are free when the new container starts.
 

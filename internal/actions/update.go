@@ -38,7 +38,7 @@ func Update(ctx context.Context, client containerpkg.Client, params types.Update
 	var backups backupSet
 	if params.UpdateStrategy == types.StrategyReplace && !params.NoRestart {
 		backups = backupSet{}
-		if err := client.RecoverBackups(ctx); err != nil {
+		if err := client.RecoverBackups(ctx, params.Filter); err != nil {
 			log.WithError(err).Warn("Could not check for containers left behind by an earlier update")
 		}
 	}
@@ -103,6 +103,15 @@ func Update(ctx context.Context, client containerpkg.Client, params types.Update
 		progress.UpdateFailed(failedStop)
 		failedStart := restartContainersInSortedOrder(ctx, containersToUpdate, client, params, stoppedImages, backups)
 		progress.UpdateFailed(failedStart)
+	}
+
+	// Every container set aside is either replaced or restored by now. Should one have been missed, put it
+	// back rather than leaving it stopped under another name.
+	for id, backup := range backups {
+		log.Errorf("%s was set aside but never replaced, restoring it", backup.OriginalName)
+		progress.UpdateFailed(map[types.ContainerID]error{
+			id: restoreBackup(ctx, client, backup, errors.New("the container was not replaced")),
+		})
 	}
 
 	if params.LifecycleHooks {

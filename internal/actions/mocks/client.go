@@ -128,7 +128,7 @@ func (client MockClient) WaitUntilHealthy(_ context.Context, id t.ContainerID, _
 }
 
 // RecoverBackups is a mock method
-func (client MockClient) RecoverBackups(_ context.Context) error {
+func (client MockClient) RecoverBackups(_ context.Context, _ t.Filter) error {
 	client.TestData.event("recover", "")
 	return nil
 }
