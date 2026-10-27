@@ -21,7 +21,7 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
 
   watchtower:
-    image: containrrr/watchtower
+    image: ghcr.io/shouyupedia/watchtower
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     command: --debug --http-api-update

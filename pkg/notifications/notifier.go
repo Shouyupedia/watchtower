@@ -74,7 +74,8 @@ func AppendLegacyUrls(urls []string, cmd *cobra.Command) ([]string, time.Duratio
 			legacyDelay = delayNotifier.GetDelay()
 		}
 
-		log.WithField("URL", shoutrrrURL).Trace("created Shoutrrr URL from legacy notifier")
+		// The URL contains the credentials of the service, so only name the service
+		log.WithField("service", GetScheme(shoutrrrURL)).Trace("created Shoutrrr URL from legacy notifier")
 	}
 
 	delay := GetDelay(cmd, legacyDelay)

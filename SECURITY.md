@@ -2,12 +2,11 @@
 
 ## Supported Versions
 
-Security updates will always only be applied to the latest version of Watchtower.
-As the software by default is set to auto-update if you use the `latest` tag, you will get these security updates automatically as soon as they are released.
+Security updates are only applied to the latest version of Watchtower.
 
 ## Reporting a Vulnerability
 
-Critical vulnerabilities that might open up for external attacks are best reported directly either to simme@arcticbit.se or nils@piksel.se.
-We'll always try to get back to you as swiftly as possible, but keep in mind that since this is a community project, we can't really leave any guarantees about the speed.
+Please report vulnerabilities privately, using [GitHub's private vulnerability reporting](https://github.com/shouyupedia/watchtower/security/advisories/new) for this repository, rather than in a public issue.
+Include the version, how to reproduce the problem and what you think the impact is. This is a community project, so there is no guarantee on how quickly you get an answer, but reports are taken seriously.
 
-Non-critical vulnerabilities may be reported as regular GitHub issues.
+Release images and archives are signed, see [Securing watchtower](docs/securing.md) for how to verify them.

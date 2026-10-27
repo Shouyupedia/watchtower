@@ -50,7 +50,7 @@ the following command:
     $ docker run -d \
     --name watchtower \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    containrrr/watchtower
+    ghcr.io/shouyupedia/watchtower
     ```
 
 === "docker-compose.yml"
@@ -59,7 +59,7 @@ the following command:
     version: "3"
     services:
       watchtower:
-        image: containrrr/watchtower
+        image: ghcr.io/shouyupedia/watchtower
         volumes:
           - /var/run/docker.sock:/var/run/docker.sock
     ```

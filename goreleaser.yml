@@ -61,7 +61,13 @@ dockers:
     goos: linux
     goarch: amd64
     dockerfile: dockerfiles/Dockerfile
-    build_flag_templates: ["--platform=linux/amd64"]
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title=watchtower"
+      - "--label=org.opencontainers.image.source=https://github.com/shouyupedia/watchtower"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
     image_templates:
       - ghcr.io/shouyupedia/watchtower:{{ .Version }}-amd64
   - id: i386
@@ -69,7 +75,13 @@ dockers:
     goos: linux
     goarch: "386"
     dockerfile: dockerfiles/Dockerfile
-    build_flag_templates: ["--platform=linux/386"]
+    build_flag_templates:
+      - "--platform=linux/386"
+      - "--label=org.opencontainers.image.title=watchtower"
+      - "--label=org.opencontainers.image.source=https://github.com/shouyupedia/watchtower"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
     image_templates:
       - ghcr.io/shouyupedia/watchtower:{{ .Version }}-i386
   - id: armhf
@@ -78,7 +90,13 @@ dockers:
     goarch: arm
     goarm: "6"
     dockerfile: dockerfiles/Dockerfile
-    build_flag_templates: ["--platform=linux/arm/v6"]
+    build_flag_templates:
+      - "--platform=linux/arm/v6"
+      - "--label=org.opencontainers.image.title=watchtower"
+      - "--label=org.opencontainers.image.source=https://github.com/shouyupedia/watchtower"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
     image_templates:
       - ghcr.io/shouyupedia/watchtower:{{ .Version }}-armhf
   - id: arm64v8
@@ -86,7 +104,13 @@ dockers:
     goos: linux
     goarch: arm64
     dockerfile: dockerfiles/Dockerfile
-    build_flag_templates: ["--platform=linux/arm64/v8"]
+    build_flag_templates:
+      - "--platform=linux/arm64/v8"
+      - "--label=org.opencontainers.image.title=watchtower"
+      - "--label=org.opencontainers.image.source=https://github.com/shouyupedia/watchtower"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
     image_templates:
       - ghcr.io/shouyupedia/watchtower:{{ .Version }}-arm64v8
 
@@ -103,3 +127,12 @@ docker_manifests:
       - ghcr.io/shouyupedia/watchtower:{{ .Version }}-i386
       - ghcr.io/shouyupedia/watchtower:{{ .Version }}-armhf
       - ghcr.io/shouyupedia/watchtower:{{ .Version }}-arm64v8
+
+docker_signs:
+  - cmd: cosign
+    artifacts: manifests
+    output: true
+    args:
+      - sign
+      - --yes
+      - ${artifact}@${digest}

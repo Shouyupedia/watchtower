@@ -14,7 +14,15 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
-      
+    groups:
+      docker:
+        patterns:
+          - "github.com/docker/*"
+          - "github.com/moby/*"
+      golang-x:
+        patterns:
+          - "golang.org/x/*"
+
   - package-ecosystem: "docker" # See documentation for possible values
     directory: "/dockerfiles" # Location of package manifests
     schedule:
