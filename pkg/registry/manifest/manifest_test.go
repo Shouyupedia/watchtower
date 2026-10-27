@@ -1,7 +1,7 @@
 package manifest_test
 
 import (
-	dockerimage "github.com/docker/docker/api/types/image"
+	dockerimage "github.com/moby/moby/api/types/image"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/shouyupedia/watchtower/internal/actions/mocks"

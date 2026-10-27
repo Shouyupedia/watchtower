@@ -10,8 +10,8 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
+	"github.com/moby/moby/api/types/container"
+	sdkClient "github.com/moby/moby/client"
 	log "github.com/shouyupedia/watchtower/internal/logging"
 
 	t "github.com/shouyupedia/watchtower/pkg/types"
@@ -79,7 +79,7 @@ func backupName(name string, now time.Time, policy container.RestartPolicy, runn
 func (client dockerClient) setRestartPolicy(ctx context.Context, id string, policy container.RestartPolicy) error {
 	ctx, cancel := callCtx(ctx)
 	defer cancel()
-	_, err := client.api.ContainerUpdate(ctx, id, container.UpdateConfig{RestartPolicy: policy})
+	_, err := client.api.ContainerUpdate(ctx, id, sdkClient.ContainerUpdateOptions{RestartPolicy: &policy})
 	return err
 }
 
@@ -122,7 +122,7 @@ func (client dockerClient) StopAndPreserve(ctx context.Context, c t.Container, t
 		if backup.WasRunning {
 			startCtx, cancel := callCtx(undoCtx)
 			defer cancel()
-			if err := client.api.ContainerStart(startCtx, idStr, container.StartOptions{}); err != nil {
+			if _, err := client.api.ContainerStart(startCtx, idStr, sdkClient.ContainerStartOptions{}); err != nil {
 				log.WithError(err).Warnf("Could not start %s again", c.Name())
 			}
 		}
@@ -135,7 +135,7 @@ func (client dockerClient) StopAndPreserve(ctx context.Context, c t.Container, t
 		}
 		log.Infof("Stopping %s (%s) with %s", c.Name(), shortID, signal)
 		killCtx, cancel := callCtx(ctx)
-		err := client.api.ContainerKill(killCtx, idStr, signal)
+		_, err := client.api.ContainerKill(killCtx, idStr, sdkClient.ContainerKillOptions{Signal: signal})
 		cancel()
 		if err != nil {
 			if changedPolicy {
@@ -149,7 +149,7 @@ func (client dockerClient) StopAndPreserve(ctx context.Context, c t.Container, t
 			// Like docker stop (and the recreate strategy, which force removes it), do not take no for an answer
 			log.Infof("%s (%s) did not stop within %v, killing it", c.Name(), shortID, timeout)
 			killCtx, cancel := callCtx(ctx)
-			err = client.api.ContainerKill(killCtx, idStr, "SIGKILL")
+			_, err = client.api.ContainerKill(killCtx, idStr, sdkClient.ContainerKillOptions{Signal: "SIGKILL"})
 			cancel()
 			if err == nil {
 				running, err = client.stopsWithin(ctx, c, killWait)
@@ -172,7 +172,7 @@ func (client dockerClient) StopAndPreserve(ctx context.Context, c t.Container, t
 	renameCtx, cancel := callCtx(ctx)
 	defer cancel()
 	log.Debugf("Renaming container %s (%s) to %s", c.Name(), shortID, backup.BackupName)
-	if err := client.api.ContainerRename(renameCtx, idStr, backup.BackupName); err != nil {
+	if _, err := client.api.ContainerRename(renameCtx, idStr, sdkClient.ContainerRenameOptions{NewName: backup.BackupName}); err != nil {
 		undo()
 		return t.ContainerBackup{}, err
 	}
@@ -185,7 +185,8 @@ func (client dockerClient) stopsWithin(ctx context.Context, c t.Container, timeo
 	_ = client.waitForStopOrTimeout(ctx, c, timeout)
 	inspectCtx, cancel := callCtx(ctx)
 	defer cancel()
-	state, err := client.api.ContainerInspect(inspectCtx, string(c.ID()))
+	inspected, err := client.api.ContainerInspect(inspectCtx, string(c.ID()), sdkClient.ContainerInspectOptions{})
+	state := inspected.Container
 	if err != nil {
 		return false, err
 	}
@@ -198,7 +199,7 @@ func (client dockerClient) RestoreContainer(ctx context.Context, b t.ContainerBa
 	id := string(b.ID)
 
 	renameCtx, cancel := callCtx(ctx)
-	err := client.api.ContainerRename(renameCtx, id, strings.TrimPrefix(b.OriginalName, "/"))
+	_, err := client.api.ContainerRename(renameCtx, id, sdkClient.ContainerRenameOptions{NewName: strings.TrimPrefix(b.OriginalName, "/")})
 	cancel()
 	if err != nil {
 		return fmt.Errorf("could not rename %s back to %s: %w", b.BackupName, b.OriginalName, err)
@@ -213,7 +214,7 @@ func (client dockerClient) RestoreContainer(ctx context.Context, b t.ContainerBa
 	if b.WasRunning {
 		startCtx, cancel := callCtx(ctx)
 		defer cancel()
-		if err := client.api.ContainerStart(startCtx, id, container.StartOptions{}); err != nil {
+		if _, err := client.api.ContainerStart(startCtx, id, sdkClient.ContainerStartOptions{}); err != nil {
 			return fmt.Errorf("could not start %s again: %w", b.OriginalName, err)
 		}
 	}
@@ -225,7 +226,7 @@ func (client dockerClient) RemoveBackup(ctx context.Context, b t.ContainerBackup
 	ctx, cancel := callCtx(ctx)
 	defer cancel()
 	log.Debugf("Removing the previous version of %s (%s)", b.OriginalName, b.ID.ShortID())
-	err := client.api.ContainerRemove(ctx, string(b.ID), container.RemoveOptions{Force: true, RemoveVolumes: client.RemoveVolumes})
+	_, err := client.api.ContainerRemove(ctx, string(b.ID), sdkClient.ContainerRemoveOptions{Force: true, RemoveVolumes: client.RemoveVolumes})
 	if err != nil && cerrdefs.IsNotFound(err) {
 		return nil
 	}
@@ -236,7 +237,7 @@ func (client dockerClient) RemoveBackup(ctx context.Context, b t.ContainerBackup
 func (client dockerClient) DiscardContainer(ctx context.Context, id t.ContainerID) error {
 	ctx, cancel := callCtx(context.WithoutCancel(ctx))
 	defer cancel()
-	err := client.api.ContainerRemove(ctx, string(id), container.RemoveOptions{Force: true})
+	_, err := client.api.ContainerRemove(ctx, string(id), sdkClient.ContainerRemoveOptions{Force: true})
 	if err != nil && cerrdefs.IsNotFound(err) {
 		return nil
 	}
@@ -256,7 +257,8 @@ func (client dockerClient) WaitUntilHealthy(ctx context.Context, id t.ContainerI
 
 	for {
 		inspectCtx, cancel := callCtx(ctx)
-		info, err := client.api.ContainerInspect(inspectCtx, string(id))
+		inspected, err := client.api.ContainerInspect(inspectCtx, string(id), sdkClient.ContainerInspectOptions{})
+		info := inspected.Container
 		cancel()
 		if err != nil {
 			return err
@@ -298,13 +300,14 @@ func (client dockerClient) WaitUntilHealthy(ctx context.Context, id t.ContainerI
 func (client dockerClient) RecoverBackups(ctx context.Context, filter t.Filter) error {
 	listCtx, cancel := callCtx(ctx)
 	defer cancel()
-	list, err := client.api.ContainerList(listCtx, container.ListOptions{
+	listed, err := client.api.ContainerList(listCtx, sdkClient.ContainerListOptions{
 		All:     true,
-		Filters: filters.NewArgs(filters.Arg("name", backupMarker)),
+		Filters: sdkClient.Filters{}.Add("name", backupMarker),
 	})
 	if err != nil {
 		return err
 	}
+	list := listed.Items
 
 	for _, summary := range list {
 		if len(summary.Names) == 0 {
@@ -351,7 +354,8 @@ func (client dockerClient) recoverBackup(ctx context.Context, backup t.Container
 	clog := log.WithFields(log.Fields{"container": backup.OriginalName, "backup": backup.BackupName})
 
 	inspectCtx, cancel := callCtx(ctx)
-	current, err := client.api.ContainerInspect(inspectCtx, strings.TrimPrefix(backup.OriginalName, "/"))
+	inspected, err := client.api.ContainerInspect(inspectCtx, strings.TrimPrefix(backup.OriginalName, "/"), sdkClient.ContainerInspectOptions{})
+	current := inspected.Container
 	cancel()
 
 	switch {

@@ -385,3 +385,58 @@ func TestReplaceUpdatesAContainerThatIgnoresItsStopSignal(t *testing.T) {
 		t.Errorf("leftovers: %v", left)
 	}
 }
+
+// hasFile checks for a file inside a container, without needing anything inside the container to do so
+func (e *env) hasFile(suffix, path string) bool {
+	_, err := tryDocker("cp", e.name(suffix)+":"+path, e.t.TempDir())
+	return err == nil
+}
+
+func TestLifecycleHooksRunInTheContainers(t *testing.T) {
+	for _, strategy := range []string{"recreate", "replace"} {
+		t.Run(strategy, func(t *testing.T) {
+			e := newEnv(t)
+			e.buildImage("v1", "ENV VERSION=1")
+			v2 := e.buildImage("v2", "ENV VERSION=2")
+			e.release("v1")
+			e.run("app", "--network", "none",
+				"--label", "com.centurylinklabs.watchtower.lifecycle.post-update=touch /tmp/post-update-ran",
+				e.image("latest"))
+			e.release("v2")
+
+			e.mustUpdate([]string{"app"}, "--update-strategy", strategy, "--enable-lifecycle-hooks")
+
+			e.requireRunningImage("app", v2)
+			if !e.hasFile("app", "/tmp/post-update-ran") {
+				t.Error("the post-update hook did not run in the new container")
+			}
+		})
+	}
+}
+
+func TestPreUpdateHookCanPostponeTheUpdate(t *testing.T) {
+	e := newEnv(t)
+	v1 := e.buildImage("v1", "ENV VERSION=1")
+	e.buildImage("v2", "ENV VERSION=2")
+	e.release("v1")
+	oldID := e.run("app", "--network", "none",
+		"--label", "com.centurylinklabs.watchtower.lifecycle.pre-update=touch /tmp/pre-update-ran; exit 75",
+		e.image("latest"))
+	e.release("v2")
+
+	out := e.mustUpdate([]string{"app"}, "--update-strategy", "replace", "--enable-lifecycle-hooks", "--log-level", "debug")
+
+	e.requireRunningImage("app", v1)
+	if got := e.inspect("app", "{{.Id}}"); got != oldID {
+		t.Error("the container was replaced although its pre-update hook asked to postpone")
+	}
+	if !e.hasFile("app", "/tmp/pre-update-ran") {
+		t.Error("the pre-update hook did not run")
+	}
+	if !strings.Contains(out, "EX_TEMPFAIL") {
+		t.Error("the postponement is not reported")
+	}
+	if left := e.leftovers(); len(left) != 0 {
+		t.Errorf("leftovers: %v", left)
+	}
+}

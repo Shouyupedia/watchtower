@@ -31,11 +31,36 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
 
+// fakeShell understands just enough of "sh -c" for lifecycle hooks in tests: commands separated by ";",
+// each either "touch <path>" or "exit <code>"
+func fakeShell(script string) {
+	for _, command := range strings.Split(script, ";") {
+		fields := strings.Fields(command)
+		if len(fields) != 2 {
+			continue
+		}
+		switch fields[0] {
+		case "touch":
+			_ = os.WriteFile(fields[1], nil, 0o644)
+		case "exit":
+			code, _ := strconv.Atoi(fields[1])
+			os.Exit(code)
+		}
+	}
+	os.Exit(0)
+}
+
 func main() {
+	if filepath.Base(os.Args[0]) == "sh" && len(os.Args) == 3 && os.Args[1] == "-c" {
+		fakeShell(os.Args[2])
+	}
 	fmt.Println("version", os.Getenv("VERSION"))
 	switch os.Getenv("MODE") {
 	case "crash":
@@ -158,8 +183,24 @@ func (e *env) image(tag string) string   { return e.prefix + "/app:" + tag }
 // buildImage creates an image that runs the test app. The changes are Dockerfile instructions (ENV, ENTRYPOINT, ...).
 func (e *env) buildImage(tag string, changes ...string) string {
 	e.t.Helper()
+	// The image holds the app, the same binary as /bin/sh (see fakeShell) and an empty /tmp
+	root := e.t.TempDir()
+	for _, dir := range []string{"bin", "tmp"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+	binary, err := os.ReadFile(appBinary)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	for _, path := range []string{"app", "bin/sh"} {
+		if err := os.WriteFile(filepath.Join(root, path), binary, 0o755); err != nil {
+			e.t.Fatal(err)
+		}
+	}
 	tar := filepath.Join(e.t.TempDir(), "app.tar")
-	if out, err := exec.Command("tar", "-C", filepath.Dir(appBinary), "-cf", tar, "app").CombinedOutput(); err != nil {
+	if out, err := exec.Command("tar", "-C", root, "-cf", tar, "app", "bin", "tmp").CombinedOutput(); err != nil {
 		e.t.Fatalf("tar failed: %v\n%s", err, out)
 	}
 	args := []string{"import", "--change", `ENTRYPOINT ["/app"]`}

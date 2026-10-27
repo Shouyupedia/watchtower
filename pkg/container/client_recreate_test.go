@@ -6,10 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	dockercontainer "github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	sdkClient "github.com/docker/docker/client"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	dockercontainer "github.com/moby/moby/api/types/container"
+	sdkClient "github.com/moby/moby/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -24,28 +22,30 @@ type recordingAPI struct {
 	startErr    error
 }
 
-func (r *recordingAPI) ContainerCreate(_ context.Context, config *dockercontainer.Config, _ *dockercontainer.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, name string) (dockercontainer.CreateResponse, error) {
+func (r *recordingAPI) ContainerCreate(_ context.Context, options sdkClient.ContainerCreateOptions) (sdkClient.ContainerCreateResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.createdWith = append(r.createdWith, config.Image)
-	return dockercontainer.CreateResponse{ID: "new-container-id"}, nil
+	r.createdWith = append(r.createdWith, options.Config.Image)
+	return sdkClient.ContainerCreateResult{ID: "new-container-id"}, nil
 }
 
-func (r *recordingAPI) NetworkDisconnect(context.Context, string, string, bool) error { return nil }
-
-func (r *recordingAPI) NetworkConnect(context.Context, string, string, *network.EndpointSettings) error {
-	return nil
+func (r *recordingAPI) NetworkDisconnect(context.Context, string, sdkClient.NetworkDisconnectOptions) (sdkClient.NetworkDisconnectResult, error) {
+	return sdkClient.NetworkDisconnectResult{}, nil
 }
 
-func (r *recordingAPI) ContainerStart(context.Context, string, dockercontainer.StartOptions) error {
-	return r.startErr
+func (r *recordingAPI) NetworkConnect(context.Context, string, sdkClient.NetworkConnectOptions) (sdkClient.NetworkConnectResult, error) {
+	return sdkClient.NetworkConnectResult{}, nil
 }
 
-func (r *recordingAPI) ContainerRemove(_ context.Context, id string, _ dockercontainer.RemoveOptions) error {
+func (r *recordingAPI) ContainerStart(context.Context, string, sdkClient.ContainerStartOptions) (sdkClient.ContainerStartResult, error) {
+	return sdkClient.ContainerStartResult{}, r.startErr
+}
+
+func (r *recordingAPI) ContainerRemove(_ context.Context, id string, _ sdkClient.ContainerRemoveOptions) (sdkClient.ContainerRemoveResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.removed = append(r.removed, id)
-	return nil
+	return sdkClient.ContainerRemoveResult{}, nil
 }
 
 func runningContainer() *Container {

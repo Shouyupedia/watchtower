@@ -11,9 +11,9 @@ import (
 	"regexp"
 	"strings"
 
-	dockercontainer "github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	dockerimage "github.com/docker/docker/api/types/image"
+	dockercontainer "github.com/moby/moby/api/types/container"
+	dockerimage "github.com/moby/moby/api/types/image"
+	dockerclient "github.com/moby/moby/client"
 	O "github.com/onsi/gomega"
 	"github.com/onsi/gomega/ghttp"
 	t "github.com/shouyupedia/watchtower/pkg/types"
@@ -80,12 +80,8 @@ func RouteContainerHandlers(server *ghttp.Server, containerRefs ...*ContainerRef
 	}
 }
 
-func createFilterArgs(statuses []string) filters.Args {
-	args := filters.NewArgs()
-	for _, status := range statuses {
-		args.Add("status", status)
-	}
-	return args
+func createFilterArgs(statuses []string) dockerclient.Filters {
+	return dockerclient.Filters{}.Add("status", statuses...)
 }
 
 var defaultImage = imageRef{
@@ -199,7 +195,7 @@ func GetImageHandler(imageInfo *dockerimage.InspectResponse) http.HandlerFunc {
 // ListContainersHandler mocks the GET containers/json endpoint, filtering the returned containers based on statuses
 func ListContainersHandler(statuses ...string) http.HandlerFunc {
 	filterArgs := createFilterArgs(statuses)
-	bytes, err := filterArgs.MarshalJSON()
+	bytes, err := json.Marshal(filterArgs)
 	O.ExpectWithOffset(1, err).ShouldNot(O.HaveOccurred())
 	query := url.Values{
 		"filters": []string{string(bytes)},
@@ -210,15 +206,15 @@ func ListContainersHandler(statuses ...string) http.HandlerFunc {
 	)
 }
 
-func respondWithFilteredContainers(filters filters.Args) http.HandlerFunc {
+func respondWithFilteredContainers(filters dockerclient.Filters) http.HandlerFunc {
 	containersJSON, err := getMockJSONFile("./mocks/data/containers.json")
 	O.ExpectWithOffset(2, err).ShouldNot(O.HaveOccurred())
 	var filteredContainers []dockercontainer.Summary
 	var containers []dockercontainer.Summary
 	O.ExpectWithOffset(2, json.Unmarshal(containersJSON, &containers)).To(O.Succeed())
 	for _, v := range containers {
-		for _, key := range filters.Get("status") {
-			if v.State == key {
+		for key := range filters["status"] {
+			if string(v.State) == key {
 				filteredContainers = append(filteredContainers, v)
 			}
 		}

@@ -10,9 +10,8 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	sdkClient "github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	sdkClient "github.com/moby/moby/client"
 	"github.com/shouyupedia/watchtower/pkg/filters"
 	t "github.com/shouyupedia/watchtower/pkg/types"
 	"github.com/stretchr/testify/assert"
@@ -45,54 +44,54 @@ func (r *replaceAPI) operations() []string {
 	return append([]string(nil), r.ops...)
 }
 
-func (r *replaceAPI) ContainerUpdate(_ context.Context, id string, cfg container.UpdateConfig) (container.UpdateResponse, error) {
-	r.record("policy:%s:%s", id, cfg.RestartPolicy.Name)
-	return container.UpdateResponse{}, nil
+func (r *replaceAPI) ContainerUpdate(_ context.Context, id string, options sdkClient.ContainerUpdateOptions) (sdkClient.ContainerUpdateResult, error) {
+	r.record("policy:%s:%s", id, options.RestartPolicy.Name)
+	return sdkClient.ContainerUpdateResult{}, nil
 }
 
-func (r *replaceAPI) ContainerKill(_ context.Context, id, signal string) error {
-	r.record("kill:%s:%s", id, signal)
+func (r *replaceAPI) ContainerKill(_ context.Context, id string, options sdkClient.ContainerKillOptions) (sdkClient.ContainerKillResult, error) {
+	r.record("kill:%s:%s", id, options.Signal)
 	if r.stopsOnKill {
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		if st, ok := r.states[id]; ok && st.ContainerJSONBase != nil && st.State != nil {
+		if st, ok := r.states[id]; ok && st.State != nil {
 			st.State.Running = false
 		}
 	}
-	return nil
+	return sdkClient.ContainerKillResult{}, nil
 }
 
-func (r *replaceAPI) ContainerInspect(_ context.Context, id string) (container.InspectResponse, error) {
+func (r *replaceAPI) ContainerInspect(_ context.Context, id string, _ sdkClient.ContainerInspectOptions) (sdkClient.ContainerInspectResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if st, ok := r.states[id]; ok {
-		return st, nil
+		return sdkClient.ContainerInspectResult{Container: st}, nil
 	}
-	return container.InspectResponse{}, cerrdefs.ErrNotFound.WithMessage("no such container: " + id)
+	return sdkClient.ContainerInspectResult{}, cerrdefs.ErrNotFound.WithMessage("no such container: " + id)
 }
 
-func (r *replaceAPI) ContainerRename(_ context.Context, id, newName string) error {
-	r.record("rename:%s:%s", id, newName)
-	return r.renameErr
+func (r *replaceAPI) ContainerRename(_ context.Context, id string, options sdkClient.ContainerRenameOptions) (sdkClient.ContainerRenameResult, error) {
+	r.record("rename:%s:%s", id, options.NewName)
+	return sdkClient.ContainerRenameResult{}, r.renameErr
 }
 
-func (r *replaceAPI) ContainerStart(_ context.Context, id string, _ container.StartOptions) error {
+func (r *replaceAPI) ContainerStart(_ context.Context, id string, _ sdkClient.ContainerStartOptions) (sdkClient.ContainerStartResult, error) {
 	r.record("start:%s", id)
-	return nil
+	return sdkClient.ContainerStartResult{}, nil
 }
 
-func (r *replaceAPI) ContainerRemove(_ context.Context, id string, opts container.RemoveOptions) error {
+func (r *replaceAPI) ContainerRemove(_ context.Context, id string, opts sdkClient.ContainerRemoveOptions) (sdkClient.ContainerRemoveResult, error) {
 	r.record("remove:%s:volumes=%t", id, opts.RemoveVolumes)
-	return nil
+	return sdkClient.ContainerRemoveResult{}, nil
 }
 
-func (r *replaceAPI) ContainerList(_ context.Context, opts container.ListOptions) ([]container.Summary, error) {
+func (r *replaceAPI) ContainerList(_ context.Context, opts sdkClient.ContainerListOptions) (sdkClient.ContainerListResult, error) {
 	r.record("list:all=%t", opts.All)
-	return r.list, nil
+	return sdkClient.ContainerListResult{Items: r.list}, nil
 }
 
-func (r *replaceAPI) ImageInspect(context.Context, string, ...sdkClient.ImageInspectOption) (image.InspectResponse, error) {
-	return image.InspectResponse{}, cerrdefs.ErrNotFound
+func (r *replaceAPI) ImageInspect(context.Context, string, ...sdkClient.ImageInspectOption) (sdkClient.ImageInspectResult, error) {
+	return sdkClient.ImageInspectResult{}, cerrdefs.ErrNotFound
 }
 
 func (r *replaceAPI) running(id string, running bool) {
@@ -104,8 +103,8 @@ func (r *replaceAPI) withState(id string, running bool, labels map[string]string
 		r.states = map[string]container.InspectResponse{}
 	}
 	r.states[id] = container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{ID: id, Name: "/" + id, State: &container.State{Running: running}, HostConfig: &container.HostConfig{}},
-		Config:            &container.Config{Labels: labels},
+		ID: id, Name: "/" + id, State: &container.State{Running: running}, HostConfig: &container.HostConfig{},
+		Config: &container.Config{Labels: labels},
 	}
 }
 
@@ -247,7 +246,7 @@ func backupFor(name string, running bool, policy container.RestartPolicy) t.Cont
 
 func TestWaitUntilHealthy(t *testing.T) {
 	state := func(s container.State, restarts int) container.InspectResponse {
-		return container.InspectResponse{ContainerJSONBase: &container.ContainerJSONBase{State: &s, RestartCount: restarts}}
+		return container.InspectResponse{State: &s, RestartCount: restarts}
 	}
 	cases := []struct {
 		name    string
@@ -281,7 +280,7 @@ func TestWaitUntilHealthy(t *testing.T) {
 
 func TestWaitUntilHealthyStopsWhenCancelled(t *testing.T) {
 	api := &replaceAPI{states: map[string]container.InspectResponse{
-		"new": {ContainerJSONBase: &container.ContainerJSONBase{State: &container.State{Running: true, Health: &container.Health{Status: "starting"}}}},
+		"new": {State: &container.State{Running: true, Health: &container.Health{Status: "starting"}}},
 	}}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
@@ -416,14 +415,14 @@ type stubbornAPI struct {
 	replaceAPI
 }
 
-func (s *stubbornAPI) ContainerKill(ctx context.Context, id, signal string) error {
-	s.record("kill:%s:%s", id, signal)
-	if signal == "SIGKILL" {
+func (s *stubbornAPI) ContainerKill(ctx context.Context, id string, options sdkClient.ContainerKillOptions) (sdkClient.ContainerKillResult, error) {
+	s.record("kill:%s:%s", id, options.Signal)
+	if options.Signal == "SIGKILL" {
 		s.mu.Lock()
 		s.states[id].State.Running = false
 		s.mu.Unlock()
 	}
-	return nil
+	return sdkClient.ContainerKillResult{}, nil
 }
 
 func TestStopAndPreserveRestoresTheContainerIfItsStateCannotBeChecked(t *testing.T) {

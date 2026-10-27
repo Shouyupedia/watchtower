@@ -1,13 +1,12 @@
 package container
 
 import (
-	dockercontainer "github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
+	dockercontainer "github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/docker/docker/api/types/backend"
-	cli "github.com/docker/docker/client"
+	cli "github.com/moby/moby/client"
 	"github.com/onsi/gomega/gbytes"
 	"github.com/onsi/gomega/ghttp"
 	log "github.com/shouyupedia/watchtower/internal/logging"
@@ -29,7 +28,11 @@ var _ = Describe("the client", func() {
 	var mockServer *ghttp.Server
 	BeforeEach(func() {
 		mockServer = ghttp.NewServer()
-		docker, _ = cli.NewClientWithOpts(
+		// The client negotiates the API version with a ping before its first request
+		ping := ghttp.RespondWith(http.StatusOK, "OK", http.Header{"Api-Version": []string{"1.51"}})
+		mockServer.RouteToHandler("HEAD", "/_ping", ping)
+		mockServer.RouteToHandler("GET", "/_ping", ping)
+		docker, _ = cli.New(
 			cli.WithHost(mockServer.URL()),
 			cli.WithHTTPClient(mockServer.HTTPTestServer.Client()))
 	})
@@ -269,7 +272,7 @@ var _ = Describe("the client", func() {
 					// API.ContainerExecCreate
 					ghttp.CombineHandlers(
 						ghttp.VerifyRequest("POST", HaveSuffix("containers/%v/exec", containerID)),
-						ghttp.VerifyJSONRepresenting(dockercontainer.ExecOptions{
+						ghttp.VerifyJSONRepresenting(dockercontainer.ExecCreateRequest{
 							User: user,
 							Tty:  true,
 							Cmd: []string{
@@ -283,7 +286,7 @@ var _ = Describe("the client", func() {
 					// API.ContainerExecStart
 					ghttp.CombineHandlers(
 						ghttp.VerifyRequest("POST", HaveSuffix("exec/%v/start", execID)),
-						ghttp.VerifyJSONRepresenting(dockercontainer.ExecStartOptions{
+						ghttp.VerifyJSONRepresenting(dockercontainer.ExecStartRequest{
 							Detach: false,
 							Tty:    true,
 						}),
@@ -292,11 +295,11 @@ var _ = Describe("the client", func() {
 					// API.ContainerExecInspect
 					ghttp.CombineHandlers(
 						ghttp.VerifyRequest("GET", HaveSuffix("exec/ex-exec-id/json")),
-						ghttp.RespondWithJSONEncoded(http.StatusOK, backend.ExecInspect{
+						ghttp.RespondWithJSONEncoded(http.StatusOK, dockercontainer.ExecInspectResponse{
 							ID:       execID,
 							Running:  false,
 							ExitCode: nil,
-							ProcessConfig: &backend.ExecProcessConfig{
+							ProcessConfig: &dockercontainer.ExecProcessConfig{
 								Entrypoint: "sh",
 								Arguments:  []string{"-c", cmd},
 								User:       user,

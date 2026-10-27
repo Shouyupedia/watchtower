@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	dockercontainer "github.com/docker/docker/api/types/container"
-	dockerimage "github.com/docker/docker/api/types/image"
-	"github.com/docker/go-connections/nat"
+	dockercontainer "github.com/moby/moby/api/types/container"
+	dockerimage "github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/api/types/network"
 	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/shouyupedia/watchtower/internal/util"
 	wt "github.com/shouyupedia/watchtower/pkg/types"
@@ -334,7 +334,7 @@ func (c Container) GetCreateConfig() *dockercontainer.Config {
 
 	// subtract ports exposed in image from container
 	for k := range config.ExposedPorts {
-		if _, ok := imageConfig.ExposedPorts[string(k)]; ok {
+		if _, ok := imageConfig.ExposedPorts[k.String()]; ok {
 			delete(config.ExposedPorts, k)
 		}
 	}
@@ -396,7 +396,7 @@ func (c Container) VerifyConfiguration() error {
 	// Instead of returning an error here, we just create an empty map
 	// This should allow for updating containers where the exposed ports are missing
 	if len(hostConfig.PortBindings) > 0 && containerConfig.ExposedPorts == nil {
-		containerConfig.ExposedPorts = make(map[nat.Port]struct{})
+		containerConfig.ExposedPorts = network.PortSet{}
 	}
 
 	return nil

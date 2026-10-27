@@ -2,9 +2,9 @@ package mocks
 
 import (
 	"fmt"
-	dockercontainer "github.com/docker/docker/api/types/container"
-	dockerimage "github.com/docker/docker/api/types/image"
-	"github.com/docker/go-connections/nat"
+	dockercontainer "github.com/moby/moby/api/types/container"
+	dockerimage "github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/api/types/network"
 	"github.com/shouyupedia/watchtower/pkg/container"
 	wt "github.com/shouyupedia/watchtower/pkg/types"
 	"strconv"
@@ -15,19 +15,18 @@ import (
 // CreateMockContainer creates a container substitute valid for testing
 func CreateMockContainer(id string, name string, image string, created time.Time) wt.Container {
 	content := dockercontainer.InspectResponse{
-		ContainerJSONBase: &dockercontainer.ContainerJSONBase{
-			ID:      id,
-			Image:   image,
-			Name:    name,
-			Created: created.Format(time.RFC3339Nano),
-			HostConfig: &dockercontainer.HostConfig{
-				PortBindings: map[nat.Port][]nat.PortBinding{},
-			},
+		ID:      id,
+		Image:   image,
+		Name:    name,
+		Created: created.Format(time.RFC3339Nano),
+		HostConfig: &dockercontainer.HostConfig{
+			PortBindings: network.PortMap{},
 		},
+
 		Config: &dockercontainer.Config{
 			Image:        image,
 			Labels:       make(map[string]string),
-			ExposedPorts: map[nat.Port]struct{}{},
+			ExposedPorts: network.PortSet{},
 		},
 	}
 	return container.NewContainer(
@@ -54,12 +53,11 @@ func CreateMockContainerWithImageInfo(id string, name string, image string, crea
 // CreateMockContainerWithImageInfoP should only be used for testing
 func CreateMockContainerWithImageInfoP(id string, name string, image string, created time.Time, imageInfo *dockerimage.InspectResponse) wt.Container {
 	content := dockercontainer.InspectResponse{
-		ContainerJSONBase: &dockercontainer.ContainerJSONBase{
-			ID:      id,
-			Image:   image,
-			Name:    name,
-			Created: created.Format(time.RFC3339Nano),
-		},
+		ID:      id,
+		Image:   image,
+		Name:    name,
+		Created: created.Format(time.RFC3339Nano),
+
 		Config: &dockercontainer.Config{
 			Image:  image,
 			Labels: make(map[string]string),
@@ -81,19 +79,18 @@ func CreateMockContainerWithDigest(id string, name string, image string, created
 // CreateMockContainerWithConfig creates a container substitute valid for testing
 func CreateMockContainerWithConfig(id string, name string, image string, running bool, restarting bool, created time.Time, config *dockercontainer.Config) wt.Container {
 	content := dockercontainer.InspectResponse{
-		ContainerJSONBase: &dockercontainer.ContainerJSONBase{
-			ID:    id,
-			Image: image,
-			Name:  name,
-			State: &dockercontainer.State{
-				Running:    running,
-				Restarting: restarting,
-			},
-			Created: created.Format(time.RFC3339Nano),
-			HostConfig: &dockercontainer.HostConfig{
-				PortBindings: map[nat.Port][]nat.PortBinding{},
-			},
+		ID:    id,
+		Image: image,
+		Name:  name,
+		State: &dockercontainer.State{
+			Running:    running,
+			Restarting: restarting,
 		},
+		Created: created.Format(time.RFC3339Nano),
+		HostConfig: &dockercontainer.HostConfig{
+			PortBindings: network.PortMap{},
+		},
+
 		Config: config,
 	}
 	return container.NewContainer(
@@ -121,15 +118,14 @@ func CreateContainerForProgress(index int, idPrefix int, nameFormat string) (wt.
 // CreateMockContainerWithLinks should only be used for testing
 func CreateMockContainerWithLinks(id string, name string, image string, created time.Time, links []string, imageInfo *dockerimage.InspectResponse) wt.Container {
 	content := dockercontainer.InspectResponse{
-		ContainerJSONBase: &dockercontainer.ContainerJSONBase{
-			ID:      id,
-			Image:   image,
-			Name:    name,
-			Created: created.Format(time.RFC3339Nano),
-			HostConfig: &dockercontainer.HostConfig{
-				Links: links,
-			},
+		ID:      id,
+		Image:   image,
+		Name:    name,
+		Created: created.Format(time.RFC3339Nano),
+		HostConfig: &dockercontainer.HostConfig{
+			Links: links,
 		},
+
 		Config: &dockercontainer.Config{
 			Image:  image,
 			Labels: make(map[string]string),

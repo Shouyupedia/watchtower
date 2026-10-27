@@ -12,11 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	sdkClient "github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/api/types/network"
+	sdkClient "github.com/moby/moby/client"
 	log "github.com/shouyupedia/watchtower/internal/logging"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
@@ -77,7 +76,7 @@ type Client interface {
 //   - DOCKER_TLS_VERIFY		whether to verify tls certificates
 //   - DOCKER_API_VERSION	pins the docker api version. If unset, the version is negotiated with the daemon
 func NewClient(opts ClientOptions) Client {
-	cli, err := sdkClient.NewClientWithOpts(sdkClient.FromEnv, sdkClient.WithAPIVersionNegotiation())
+	cli, err := sdkClient.New(sdkClient.FromEnv)
 
 	if err != nil {
 		log.Fatalf("Error instantiating Docker client: %s", err)
@@ -150,15 +149,16 @@ func (client dockerClient) ListContainers(ctx context.Context, fn t.Filter) ([]t
 	filter := client.createListFilter()
 	listCtx, cancel := callCtx(ctx)
 	defer cancel()
-	containers, err := client.api.ContainerList(
+	listed, err := client.api.ContainerList(
 		listCtx,
-		container.ListOptions{
+		sdkClient.ContainerListOptions{
 			Filters: filter,
 		})
 
 	if err != nil {
 		return nil, err
 	}
+	containers := listed.Items
 
 	// Inspecting is what makes listing slow, as it takes a round trip per container (and one for its image).
 	// Do it in parallel, while keeping the order the daemon returned the containers in.
@@ -211,8 +211,8 @@ func (ic *imageCache) put(key string, info *image.InspectResponse) {
 	ic.images[key] = info
 }
 
-func (client dockerClient) createListFilter() filters.Args {
-	filterArgs := filters.NewArgs()
+func (client dockerClient) createListFilter() sdkClient.Filters {
+	filterArgs := sdkClient.Filters{}
 	filterArgs.Add("status", "running")
 
 	if client.IncludeStopped {
@@ -235,14 +235,15 @@ func (client dockerClient) getContainer(ctx context.Context, containerID t.Conta
 	ctx, cancel := callCtx(ctx)
 	defer cancel()
 
-	containerInfo, err := client.api.ContainerInspect(ctx, string(containerID))
+	inspected, err := client.api.ContainerInspect(ctx, string(containerID), sdkClient.ContainerInspectOptions{})
 	if err != nil {
 		return &Container{}, err
 	}
+	containerInfo := inspected.Container
 
 	netType, netContainerId, found := strings.Cut(string(containerInfo.HostConfig.NetworkMode), ":")
 	if found && netType == "container" {
-		parentContainer, err := client.api.ContainerInspect(ctx, netContainerId)
+		parent, err := client.api.ContainerInspect(ctx, netContainerId, sdkClient.ContainerInspectOptions{})
 		if err != nil {
 			log.WithFields(map[string]interface{}{
 				"container":         containerInfo.Name,
@@ -252,7 +253,7 @@ func (client dockerClient) getContainer(ctx context.Context, containerID t.Conta
 
 		} else {
 			// Replace the container ID with a container name to allow it to reference the re-created network container
-			containerInfo.HostConfig.NetworkMode = container.NetworkMode(fmt.Sprintf("container:%s", parentContainer.Name))
+			containerInfo.HostConfig.NetworkMode = container.NetworkMode(fmt.Sprintf("container:%s", parent.Container.Name))
 		}
 	}
 
@@ -266,7 +267,8 @@ func (client dockerClient) getContainer(ctx context.Context, containerID t.Conta
 		}
 	}
 
-	imageInfo, err := client.api.ImageInspect(ctx, containerInfo.Image)
+	inspectedImage, err := client.api.ImageInspect(ctx, containerInfo.Image)
+	imageInfo := inspectedImage.InspectResponse
 	if err != nil {
 		log.Warnf("Failed to retrieve container image info: %v", err)
 		if images != nil {
@@ -286,7 +288,7 @@ func (client dockerClient) getContainer(ctx context.Context, containerID t.Conta
 func (client dockerClient) Ping(ctx context.Context) error {
 	ctx, cancel := callCtx(ctx)
 	defer cancel()
-	_, err := client.api.Ping(ctx)
+	_, err := client.api.Ping(ctx, sdkClient.PingOptions{})
 	return err
 }
 
@@ -302,7 +304,7 @@ func (client dockerClient) StopContainer(ctx context.Context, c t.Container, tim
 	if c.IsRunning() {
 		log.Infof("Stopping %s (%s) with %s", c.Name(), shortID, signal)
 		killCtx, cancel := callCtx(ctx)
-		err := client.api.ContainerKill(killCtx, idStr, signal)
+		_, err := client.api.ContainerKill(killCtx, idStr, sdkClient.ContainerKillOptions{Signal: signal})
 		cancel()
 		if err != nil {
 			return err
@@ -318,7 +320,7 @@ func (client dockerClient) StopContainer(ctx context.Context, c t.Container, tim
 		log.Debugf("Removing container %s", shortID)
 
 		removeCtx, cancel := callCtx(ctx)
-		err := client.api.ContainerRemove(removeCtx, idStr, container.RemoveOptions{Force: true, RemoveVolumes: client.RemoveVolumes})
+		_, err := client.api.ContainerRemove(removeCtx, idStr, sdkClient.ContainerRemoveOptions{Force: true, RemoveVolumes: client.RemoveVolumes})
 		cancel()
 		if err != nil {
 			if cerrdefs.IsNotFound(err) {
@@ -405,7 +407,12 @@ func (client dockerClient) recreateContainer(ctx context.Context, c t.Container,
 	opCtx, cancel := callCtx(ctx)
 	defer cancel()
 
-	createdContainer, err := client.api.ContainerCreate(opCtx, config, hostConfig, simpleNetworkConfig, nil, name)
+	createdContainer, err := client.api.ContainerCreate(opCtx, sdkClient.ContainerCreateOptions{
+		Config:           config,
+		HostConfig:       hostConfig,
+		NetworkingConfig: simpleNetworkConfig,
+		Name:             name,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -421,7 +428,7 @@ func (client dockerClient) recreateContainer(ctx context.Context, c t.Container,
 func (client dockerClient) connectAndStart(
 	ctx context.Context,
 	c t.Container,
-	created container.CreateResponse,
+	created sdkClient.ContainerCreateResult,
 	hostConfig *container.HostConfig,
 	simpleNetworkConfig *network.NetworkingConfig,
 	networkConfig *network.NetworkingConfig,
@@ -429,13 +436,13 @@ func (client dockerClient) connectAndStart(
 	if !(hostConfig.NetworkMode.IsHost()) {
 
 		for k := range simpleNetworkConfig.EndpointsConfig {
-			if err := client.api.NetworkDisconnect(ctx, k, created.ID, true); err != nil {
+			if _, err := client.api.NetworkDisconnect(ctx, k, sdkClient.NetworkDisconnectOptions{Container: created.ID, Force: true}); err != nil {
 				return err
 			}
 		}
 
 		for k, v := range networkConfig.EndpointsConfig {
-			if err := client.api.NetworkConnect(ctx, k, created.ID, v); err != nil {
+			if _, err := client.api.NetworkConnect(ctx, k, sdkClient.NetworkConnectOptions{Container: created.ID, EndpointConfig: v}); err != nil {
 				return err
 			}
 		}
@@ -454,18 +461,18 @@ func (client dockerClient) discardContainer(ctx context.Context, name, id string
 	ctx, cancel := callCtx(context.WithoutCancel(ctx))
 	defer cancel()
 
-	if err := client.api.ContainerRemove(ctx, id, container.RemoveOptions{Force: true}); err != nil {
+	if _, err := client.api.ContainerRemove(ctx, id, sdkClient.ContainerRemoveOptions{Force: true}); err != nil {
 		log.WithError(err).Warnf("Could not remove the incomplete container %s (%s), it has to be removed manually", name, t.ContainerID(id).ShortID())
 		return
 	}
 	log.Debugf("Removed the incomplete container %s (%s)", name, t.ContainerID(id).ShortID())
 }
 
-func (client dockerClient) doStartContainer(ctx context.Context, c t.Container, creation container.CreateResponse) error {
+func (client dockerClient) doStartContainer(ctx context.Context, c t.Container, creation sdkClient.ContainerCreateResult) error {
 	name := c.Name()
 
 	log.Debugf("Starting container %s (%s)", name, t.ContainerID(creation.ID).ShortID())
-	err := client.api.ContainerStart(ctx, creation.ID, container.StartOptions{})
+	_, err := client.api.ContainerStart(ctx, creation.ID, sdkClient.ContainerStartOptions{})
 	if err != nil {
 		return err
 	}
@@ -476,7 +483,8 @@ func (client dockerClient) RenameContainer(ctx context.Context, c t.Container, n
 	ctx, cancel := callCtx(ctx)
 	defer cancel()
 	log.Debugf("Renaming container %s (%s) to %s", c.Name(), c.ID().ShortID(), newName)
-	return client.api.ContainerRename(ctx, string(c.ID()), newName)
+	_, err := client.api.ContainerRename(ctx, string(c.ID()), sdkClient.ContainerRenameOptions{NewName: newName})
+	return err
 }
 
 func (client dockerClient) IsContainerStale(ctx context.Context, container t.Container, params t.UpdateParams) (stale bool, latestImage t.ImageID, err error) {
@@ -563,7 +571,7 @@ func (client dockerClient) PullImage(ctx context.Context, container t.Container)
 	return err
 }
 
-func (client dockerClient) pullImage(ctx context.Context, imageName string, opts image.PullOptions) error {
+func (client dockerClient) pullImage(ctx context.Context, imageName string, opts sdkClient.ImagePullOptions) error {
 	response, err := client.api.ImagePull(ctx, imageName, opts)
 	if err != nil {
 		log.Debugf("Error pulling image %s, %s", imageName, err)
@@ -598,12 +606,13 @@ func (client dockerClient) RemoveImageByID(ctx context.Context, id t.ImageID) er
 
 	ctx, cancel := callCtx(ctx)
 	defer cancel()
-	items, err := client.api.ImageRemove(
+	removed, err := client.api.ImageRemove(
 		ctx,
 		string(id),
-		image.RemoveOptions{
+		sdkClient.ImageRemoveOptions{
 			Force: true,
 		})
+	items := removed.Items
 
 	if log.IsLevelEnabled(log.DebugLevel) {
 		deleted := strings.Builder{}
@@ -633,13 +642,13 @@ func (client dockerClient) ExecuteCommand(ctx context.Context, containerID t.Con
 	clog := log.WithField("containerID", containerID)
 
 	// Create the exec
-	execConfig := container.ExecOptions{
-		Tty: true,
+	execConfig := sdkClient.ExecCreateOptions{
+		TTY: true,
 		Cmd: []string{"sh", "-c", command},
 	}
 
 	createCtx, cancel := callCtx(ctx)
-	exec, err := client.api.ContainerExecCreate(createCtx, string(containerID), execConfig)
+	exec, err := client.api.ExecCreate(createCtx, string(containerID), execConfig)
 	cancel()
 	if err != nil {
 		return false, err
@@ -654,17 +663,13 @@ func (client dockerClient) ExecuteCommand(ctx context.Context, containerID t.Con
 		defer cancelExec()
 	}
 
-	response, attachErr := client.api.ContainerExecAttach(execCtx, exec.ID, container.ExecAttachOptions{
-		Tty:    true,
-		Detach: false,
-	})
+	response, attachErr := client.api.ExecAttach(execCtx, exec.ID, sdkClient.ExecAttachOptions{TTY: true})
 	if attachErr != nil {
 		clog.Errorf("Failed to extract command exec logs: %v", attachErr)
 	}
 
 	// Run the exec
-	execStartCheck := container.ExecStartOptions{Detach: false, Tty: true}
-	err = client.api.ContainerExecStart(execCtx, exec.ID, execStartCheck)
+	_, err = client.api.ExecStart(execCtx, exec.ID, sdkClient.ExecStartOptions{TTY: true})
 	if err != nil {
 		return false, err
 	}
@@ -695,12 +700,12 @@ func (client dockerClient) waitForExecOrTimeout(ctx context.Context, ID string, 
 	const ExTempFail = 75
 
 	for {
-		execInspect, err := client.api.ContainerExecInspect(ctx, ID)
+		execInspect, err := client.api.ExecInspect(ctx, ID, sdkClient.ExecInspectOptions{})
 
 		//goland:noinspection GoNilness
 		log.WithFields(log.Fields{
 			"exit-code":    execInspect.ExitCode,
-			"exec-id":      execInspect.ExecID,
+			"exec-id":      execInspect.ID,
 			"running":      execInspect.Running,
 			"container-id": execInspect.ContainerID,
 		}).Debug("Awaiting timeout or completion")
@@ -742,7 +747,8 @@ func (client dockerClient) waitForStopOrTimeout(ctx context.Context, c t.Contain
 			return ctx.Err()
 		default:
 			inspectCtx, cancel := callCtx(ctx)
-			ci, err := client.api.ContainerInspect(inspectCtx, string(c.ID()))
+			inspected, err := client.api.ContainerInspect(inspectCtx, string(c.ID()), sdkClient.ContainerInspectOptions{})
+			ci := inspected.Container
 			cancel()
 			if err != nil {
 				return err

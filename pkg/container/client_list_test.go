@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	dockercontainer "github.com/docker/docker/api/types/container"
-	dockerimage "github.com/docker/docker/api/types/image"
-	sdkClient "github.com/docker/docker/client"
+	dockercontainer "github.com/moby/moby/api/types/container"
+	dockerimage "github.com/moby/moby/api/types/image"
+	sdkClient "github.com/moby/moby/client"
 	"github.com/shouyupedia/watchtower/pkg/filters"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,15 +31,15 @@ type latencyAPI struct {
 	mu         sync.Mutex
 }
 
-func (l *latencyAPI) ContainerList(context.Context, dockercontainer.ListOptions) ([]dockercontainer.Summary, error) {
+func (l *latencyAPI) ContainerList(context.Context, sdkClient.ContainerListOptions) (sdkClient.ContainerListResult, error) {
 	list := make([]dockercontainer.Summary, l.count)
 	for i := range list {
 		list[i] = dockercontainer.Summary{ID: fmt.Sprintf("c%03d", i)}
 	}
-	return list, nil
+	return sdkClient.ContainerListResult{Items: list}, nil
 }
 
-func (l *latencyAPI) ContainerInspect(ctx context.Context, id string) (dockercontainer.InspectResponse, error) {
+func (l *latencyAPI) ContainerInspect(ctx context.Context, id string, _ sdkClient.ContainerInspectOptions) (sdkClient.ContainerInspectResult, error) {
 	l.inspects.Add(1)
 	cur := l.inFlight.Add(1)
 	defer l.inFlight.Add(-1)
@@ -52,29 +52,28 @@ func (l *latencyAPI) ContainerInspect(ctx context.Context, id string) (dockercon
 	select {
 	case <-time.After(l.latency):
 	case <-ctx.Done():
-		return dockercontainer.InspectResponse{}, ctx.Err()
+		return sdkClient.ContainerInspectResult{}, ctx.Err()
 	}
 	if id == l.failOn {
-		return dockercontainer.InspectResponse{}, fmt.Errorf("inspect %s failed", id)
+		return sdkClient.ContainerInspectResult{}, fmt.Errorf("inspect %s failed", id)
 	}
 
 	var n int
 	_, _ = fmt.Sscanf(id, "c%03d", &n)
-	return dockercontainer.InspectResponse{
-		ContainerJSONBase: &dockercontainer.ContainerJSONBase{
-			ID:         id,
-			Name:       "/" + id,
-			Image:      fmt.Sprintf("sha256:image%d", n%l.sharedImages),
-			HostConfig: &dockercontainer.HostConfig{},
-		},
+	return sdkClient.ContainerInspectResult{Container: dockercontainer.InspectResponse{
+		ID:         id,
+		Name:       "/" + id,
+		Image:      fmt.Sprintf("sha256:image%d", n%l.sharedImages),
+		HostConfig: &dockercontainer.HostConfig{},
+
 		Config: &dockercontainer.Config{Labels: map[string]string{}},
-	}, nil
+	}}, nil
 }
 
-func (l *latencyAPI) ImageInspect(_ context.Context, id string, _ ...sdkClient.ImageInspectOption) (dockerimage.InspectResponse, error) {
+func (l *latencyAPI) ImageInspect(_ context.Context, id string, _ ...sdkClient.ImageInspectOption) (sdkClient.ImageInspectResult, error) {
 	l.imageCalls.Add(1)
 	time.Sleep(l.latency)
-	return dockerimage.InspectResponse{ID: id}, nil
+	return sdkClient.ImageInspectResult{InspectResponse: dockerimage.InspectResponse{ID: id}}, nil
 }
 
 func TestListContainersInspectsInParallelAndKeepsOrder(t *testing.T) {
