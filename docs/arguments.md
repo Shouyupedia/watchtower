@@ -474,6 +474,33 @@ Environment Variable: WATCHTOWER_REGISTRY_TLS_SKIP_VERIFY
              Default: false
 ```
 
+## Update strategy
+How a container is replaced when a new image is found.
+
+-   `recreate` (default): the old container is removed first, then the new one is created. If the new one cannot be created or started, the container is gone (see `--rollback-on-failure`).
+-   `replace`: the old container is stopped and renamed (`<name>_wt-prev-<time>-<policy><state>`), the new container is created under the original name, and only when it has started (and, if `--rollback-health-timeout` is set, proven that it works) the old one is removed. Otherwise the new container is removed and the old one is put back and started again, with its restart policy restored. The old container's restart policy is turned off while it is set aside, so the daemon does not bring it back by itself.
+
+With `replace`, containers set aside by a watchtower that was interrupted (older than 10 minutes) are dealt with at the start of the next update: restored if nothing took their place, removed if their replacement is running, and left alone, with a warning, if the replacement is not running.
+
+Containers that the daemon removes by itself when they stop (`--rm`), and the watchtower container itself, use `recreate` regardless. The old container is renamed, since a name can only be used once, and it is stopped before the new one is created, so published ports and similar resources are free when the new container starts.
+
+```text
+            Argument: --update-strategy
+Environment Variable: WATCHTOWER_UPDATE_STRATEGY
+     Possible values: recreate, replace
+             Default: recreate
+```
+
+## Rollback health timeout
+With `--update-strategy=replace`: for how long a new container has to prove that it works before the old one is removed. A container with a health check has to become healthy within the time. One without has to still be running, and not have restarted, once the time has passed. `0` (the default) only requires the container to have started.
+
+```text
+            Argument: --rollback-health-timeout
+Environment Variable: WATCHTOWER_ROLLBACK_HEALTH_TIMEOUT
+                Type: Duration
+             Default: 0
+```
+
 ## Rollback on failure
 If a container cannot be started with the new image, recreate it from the image it used before, so that the service comes back instead of staying down. The container is still reported as failed, together with the outcome of the rollback. The previous image is kept (not cleaned up) for containers that failed. The watchtower container itself is not rolled back, as the old instance keeps running if the new one fails to start.
 

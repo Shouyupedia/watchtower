@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	containerpkg "github.com/shouyupedia/watchtower/pkg/container"
 	t "github.com/shouyupedia/watchtower/pkg/types"
 )
 
@@ -28,6 +30,20 @@ type TestData struct {
 	FailRollback map[string]bool
 	// RolledBack collects the names of the containers that were rolled back
 	RolledBack []string
+
+	// NotPreservable, FailPreserve, FailHealth and FailRestore make the corresponding replace strategy
+	// operation fail for the containers (or, for FailHealth, the new containers) with these names
+	NotPreservable map[string]bool
+	FailPreserve   map[string]bool
+	FailHealth     map[string]bool
+	FailRestore    map[string]bool
+	// Events is the order in which the replace strategy operations were called, as "operation:name"
+	Events []string
+}
+
+// event records an operation for tests that care about the order things happen in
+func (testdata *TestData) event(operation string, name string) {
+	testdata.Events = append(testdata.Events, operation+":"+name)
 }
 
 // TriedToRemoveImage is a test helper function to check whether RemoveImageByID has been called
@@ -59,10 +75,60 @@ func (client MockClient) StopContainer(_ context.Context, c t.Container, _ time.
 
 // StartContainer is a mock method
 func (client MockClient) StartContainer(_ context.Context, c t.Container) (t.ContainerID, error) {
+	client.TestData.event("start", c.Name())
 	if client.TestData.FailStart[c.Name()] {
 		return "", errors.New("failed to start the container")
 	}
-	return "", nil
+	return t.ContainerID("new-" + c.Name()), nil
+}
+
+// StopAndPreserve is a mock method
+func (client MockClient) StopAndPreserve(_ context.Context, c t.Container, _ time.Duration) (t.ContainerBackup, error) {
+	if client.TestData.NotPreservable[c.Name()] {
+		return t.ContainerBackup{}, containerpkg.ErrNotPreservable
+	}
+	if client.TestData.FailPreserve[c.Name()] {
+		return t.ContainerBackup{}, errors.New("failed to stop the container")
+	}
+	client.TestData.event("preserve", c.Name())
+	return t.ContainerBackup{ID: c.ID(), OriginalName: c.Name(), BackupName: c.Name() + "_wt-prev", WasRunning: c.IsRunning()}, nil
+}
+
+// RestoreContainer is a mock method
+func (client MockClient) RestoreContainer(_ context.Context, b t.ContainerBackup) error {
+	client.TestData.event("restore", b.OriginalName)
+	if client.TestData.FailRestore[b.OriginalName] {
+		return errors.New("failed to rename the container")
+	}
+	return nil
+}
+
+// RemoveBackup is a mock method
+func (client MockClient) RemoveBackup(_ context.Context, b t.ContainerBackup) error {
+	client.TestData.event("remove-backup", b.OriginalName)
+	return nil
+}
+
+// DiscardContainer is a mock method
+func (client MockClient) DiscardContainer(_ context.Context, id t.ContainerID) error {
+	client.TestData.event("discard", strings.TrimPrefix(string(id), "new-"))
+	return nil
+}
+
+// WaitUntilHealthy is a mock method
+func (client MockClient) WaitUntilHealthy(_ context.Context, id t.ContainerID, _ time.Duration) error {
+	name := strings.TrimPrefix(string(id), "new-")
+	client.TestData.event("health", name)
+	if client.TestData.FailHealth[name] {
+		return errors.New("the container reported itself unhealthy")
+	}
+	return nil
+}
+
+// RecoverBackups is a mock method
+func (client MockClient) RecoverBackups(_ context.Context) error {
+	client.TestData.event("recover", "")
+	return nil
 }
 
 // RollbackContainer is a mock method that records the rollback

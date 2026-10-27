@@ -67,14 +67,14 @@ func (c Container) ID() wt.ContainerID {
 // container is running. The status is determined by the value of the
 // container's "State.Running" property.
 func (c Container) IsRunning() bool {
-	return c.containerInfo.State.Running
+	return c.containerInfo.State != nil && c.containerInfo.State.Running
 }
 
 // IsRestarting returns a boolean flag indicating whether or not the current
 // container is restarting. The status is determined by the value of the
 // container's "State.Restarting" property.
 func (c Container) IsRestarting() bool {
-	return c.containerInfo.State.Restarting
+	return c.containerInfo.State != nil && c.containerInfo.State.Restarting
 }
 
 // Name returns the Docker container name.

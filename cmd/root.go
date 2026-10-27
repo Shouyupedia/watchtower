@@ -45,6 +45,8 @@ var (
 	labelPrecedence   bool
 	checkConcurrency  int
 	rollbackOnFailure bool
+	updateStrategy    t.UpdateStrategy
+	healthTimeout     time.Duration
 )
 
 var rootCmd = NewRootCommand()
@@ -104,6 +106,19 @@ func PreRun(cmd *cobra.Command, _ []string) {
 	labelPrecedence, _ = f.GetBool("label-take-precedence")
 	checkConcurrency, _ = f.GetInt("check-concurrency")
 	rollbackOnFailure, _ = f.GetBool("rollback-on-failure")
+	healthTimeout, _ = f.GetDuration("rollback-health-timeout")
+
+	rawStrategy, _ := f.GetString("update-strategy")
+	var validStrategy bool
+	if updateStrategy, validStrategy = t.ParseUpdateStrategy(rawStrategy); !validStrategy {
+		log.Fatalf("Invalid update strategy %q: use \"recreate\" or \"replace\"", rawStrategy)
+	}
+	if healthTimeout < 0 {
+		log.Fatal("Please specify a positive value for the rollback health timeout.")
+	}
+	if healthTimeout > 0 && updateStrategy != t.StrategyReplace {
+		log.Warn("--rollback-health-timeout only has an effect together with --update-strategy=replace")
+	}
 
 	if scope != "" {
 		log.Debugf(`Using scope %q`, scope)
@@ -427,6 +442,8 @@ func runUpdatesWithNotifications(ctx context.Context, filter t.Filter) *metrics.
 
 		CheckConcurrency:  checkConcurrency,
 		RollbackOnFailure: rollbackOnFailure,
+		UpdateStrategy:    updateStrategy,
+		HealthTimeout:     healthTimeout,
 	}
 	result, err := actions.Update(ctx, client, updateParams)
 	if err != nil {

@@ -58,6 +58,16 @@ type Client interface {
 	RemoveImageByID(context.Context, t.ImageID) error
 	WarnOnHeadPullFailed(container t.Container) bool
 	Ping(context.Context) error
+
+	// The following are used by the replace update strategy, where the old container is kept until the new one works
+
+	// StopAndPreserve stops a container and renames it, returning ErrNotPreservable if that is not possible
+	StopAndPreserve(ctx context.Context, c t.Container, timeout time.Duration) (t.ContainerBackup, error)
+	RestoreContainer(context.Context, t.ContainerBackup) error
+	RemoveBackup(context.Context, t.ContainerBackup) error
+	DiscardContainer(context.Context, t.ContainerID) error
+	WaitUntilHealthy(ctx context.Context, id t.ContainerID, timeout time.Duration) error
+	RecoverBackups(context.Context) error
 }
 
 // NewClient returns a new Client instance which can be used to interact with

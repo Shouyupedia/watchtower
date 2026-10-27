@@ -75,3 +75,13 @@ type Container interface {
 	GetCreateConfig() *dockercontainer.Config
 	GetCreateHostConfig() *dockercontainer.HostConfig
 }
+
+// ContainerBackup is a container that has been stopped and renamed to make room for its replacement,
+// and that is kept around so it can be put back should the replacement fail
+type ContainerBackup struct {
+	ID            ContainerID
+	OriginalName  string
+	BackupName    string
+	WasRunning    bool
+	RestartPolicy dockercontainer.RestartPolicy
+}

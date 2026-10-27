@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/shouyupedia/watchtower/pkg/types"
 	"os"
 	"regexp"
 	"strings"
@@ -148,6 +149,16 @@ func RegisterSystemFlags(rootCmd *cobra.Command) {
 		"",
 		envBool("WATCHTOWER_ROLLING_RESTART"),
 		"Restart containers one at a time")
+
+	flags.String(
+		"update-strategy",
+		envString("WATCHTOWER_UPDATE_STRATEGY"),
+		"How containers are replaced: 'recreate' removes the old container first, 'replace' keeps it until the new one works")
+
+	flags.Duration(
+		"rollback-health-timeout",
+		envDuration("WATCHTOWER_ROLLBACK_HEALTH_TIMEOUT"),
+		"With the 'replace' strategy: how long a new container has to prove it works before the old one is removed")
 
 	flags.Bool(
 		"rollback-on-failure",
@@ -441,6 +452,7 @@ func SetDefaults() {
 	viper.AutomaticEnv()
 	viper.SetDefault("DOCKER_HOST", "unix:///var/run/docker.sock")
 	viper.SetDefault("WATCHTOWER_CHECK_CONCURRENCY", 4)
+	viper.SetDefault("WATCHTOWER_UPDATE_STRATEGY", string(types.StrategyRecreate))
 	viper.SetDefault("WATCHTOWER_HTTP_API_LISTEN", ":8080")
 	viper.SetDefault("WATCHTOWER_POLL_INTERVAL", defaultInterval)
 	viper.SetDefault("WATCHTOWER_TIMEOUT", time.Second*10)

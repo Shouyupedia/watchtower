@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	containerpkg "github.com/shouyupedia/watchtower/pkg/container"
 	"sync"
 
 	"github.com/shouyupedia/watchtower/internal/util"
-	"github.com/shouyupedia/watchtower/pkg/container"
 	"github.com/shouyupedia/watchtower/pkg/lifecycle"
 	"github.com/shouyupedia/watchtower/pkg/session"
 	"github.com/shouyupedia/watchtower/pkg/sorter"
@@ -19,7 +19,7 @@ import (
 // used to start those containers have been updated. If a change is detected in
 // any of the images, the associated containers are stopped and restarted with
 // the new image.
-func Update(ctx context.Context, client container.Client, params types.UpdateParams) (types.Report, error) {
+func Update(ctx context.Context, client containerpkg.Client, params types.UpdateParams) (types.Report, error) {
 	log.Debug("Checking containers for updated images")
 	progress := &session.Progress{}
 	staleCount := 0
@@ -32,6 +32,15 @@ func Update(ctx context.Context, client container.Client, params types.UpdatePar
 	if params.LifecycleHooks {
 		// The containers have just been listed, so there is no need to ask the daemon for them again
 		lifecycle.ExecutePreChecks(ctx, client, containers)
+	}
+
+	// With the replace strategy the previous versions of the containers are kept here until their replacements work
+	var backups backupSet
+	if params.UpdateStrategy == types.StrategyReplace && !params.NoRestart {
+		backups = backupSet{}
+		if err := client.RecoverBackups(ctx); err != nil {
+			log.WithError(err).Warn("Could not check for containers left behind by an earlier update")
+		}
 	}
 
 	staleCheckFailed := 0
@@ -88,11 +97,11 @@ func Update(ctx context.Context, client container.Client, params types.UpdatePar
 	}
 
 	if params.RollingRestart {
-		progress.UpdateFailed(performRollingRestart(ctx, containersToUpdate, client, params))
+		progress.UpdateFailed(performRollingRestart(ctx, containersToUpdate, client, params, backups))
 	} else {
-		failedStop, stoppedImages := stopContainersInReversedOrder(ctx, containersToUpdate, client, params)
+		failedStop, stoppedImages := stopContainersInReversedOrder(ctx, containersToUpdate, client, params, backups)
 		progress.UpdateFailed(failedStop)
-		failedStart := restartContainersInSortedOrder(ctx, containersToUpdate, client, params, stoppedImages)
+		failedStart := restartContainersInSortedOrder(ctx, containersToUpdate, client, params, stoppedImages, backups)
 		progress.UpdateFailed(failedStart)
 	}
 
@@ -109,7 +118,7 @@ type staleCheck struct {
 }
 
 // checkStaleness runs IsContainerStale for every container, up to params.CheckConcurrency at a time
-func checkStaleness(ctx context.Context, client container.Client, containers []types.Container, params types.UpdateParams) []staleCheck {
+func checkStaleness(ctx context.Context, client containerpkg.Client, containers []types.Container, params types.UpdateParams) []staleCheck {
 	results := make([]staleCheck, len(containers))
 	check := func(i int) {
 		results[i].stale, results[i].newestImage, results[i].err = client.IsContainerStale(ctx, containers[i], params)
@@ -137,17 +146,17 @@ func checkStaleness(ctx context.Context, client container.Client, containers []t
 	return results
 }
 
-func performRollingRestart(ctx context.Context, containers []types.Container, client container.Client, params types.UpdateParams) map[types.ContainerID]error {
+func performRollingRestart(ctx context.Context, containers []types.Container, client containerpkg.Client, params types.UpdateParams, backups backupSet) map[types.ContainerID]error {
 	cleanupImageIDs := make(map[types.ImageID]bool, len(containers))
 	failed := make(map[types.ContainerID]error, len(containers))
 
 	for i := len(containers) - 1; i >= 0; i-- {
 		if containers[i].ToRestart() {
-			err := stopStaleContainer(ctx, containers[i], client, params)
+			err := stopStaleContainer(ctx, containers[i], client, params, backups)
 			if err != nil {
 				failed[containers[i].ID()] = err
 			} else {
-				if err := restartStaleContainer(ctx, containers[i], client, params); err != nil {
+				if err := restartStaleContainer(ctx, containers[i], client, params, backups); err != nil {
 					failed[containers[i].ID()] = err
 				} else if containers[i].IsStale() {
 					// Only add (previously) stale containers' images to cleanup
@@ -163,11 +172,11 @@ func performRollingRestart(ctx context.Context, containers []types.Container, cl
 	return failed
 }
 
-func stopContainersInReversedOrder(ctx context.Context, containers []types.Container, client container.Client, params types.UpdateParams) (failed map[types.ContainerID]error, stopped map[types.ImageID]bool) {
+func stopContainersInReversedOrder(ctx context.Context, containers []types.Container, client containerpkg.Client, params types.UpdateParams, backups backupSet) (failed map[types.ContainerID]error, stopped map[types.ImageID]bool) {
 	failed = make(map[types.ContainerID]error, len(containers))
 	stopped = make(map[types.ImageID]bool, len(containers))
 	for i := len(containers) - 1; i >= 0; i-- {
-		if err := stopStaleContainer(ctx, containers[i], client, params); err != nil {
+		if err := stopStaleContainer(ctx, containers[i], client, params, backups); err != nil {
 			failed[containers[i].ID()] = err
 		} else {
 			// NOTE: If a container is restarted due to a dependency this might be empty
@@ -178,7 +187,7 @@ func stopContainersInReversedOrder(ctx context.Context, containers []types.Conta
 	return
 }
 
-func stopStaleContainer(ctx context.Context, container types.Container, client container.Client, params types.UpdateParams) error {
+func stopStaleContainer(ctx context.Context, container types.Container, client containerpkg.Client, params types.UpdateParams, backups backupSet) error {
 	if container.IsWatchtower() {
 		log.Debugf("This is the watchtower container %s", container.Name())
 		return nil
@@ -208,6 +217,19 @@ func stopStaleContainer(ctx context.Context, container types.Container, client c
 		}
 	}
 
+	if backups != nil {
+		backup, err := client.StopAndPreserve(ctx, container, params.Timeout)
+		if err == nil {
+			backups[container.ID()] = backup
+			return nil
+		}
+		if !errors.Is(err, containerpkg.ErrNotPreservable) {
+			log.Error(err)
+			return err
+		}
+		log.Debugf("%s cannot be kept while it is replaced, using the recreate strategy for it", container.Name())
+	}
+
 	if err := client.StopContainer(ctx, container, params.Timeout); err != nil {
 		log.Error(err)
 		return err
@@ -215,7 +237,7 @@ func stopStaleContainer(ctx context.Context, container types.Container, client c
 	return nil
 }
 
-func restartContainersInSortedOrder(ctx context.Context, containers []types.Container, client container.Client, params types.UpdateParams, stoppedImages map[types.ImageID]bool) map[types.ContainerID]error {
+func restartContainersInSortedOrder(ctx context.Context, containers []types.Container, client containerpkg.Client, params types.UpdateParams, stoppedImages map[types.ImageID]bool, backups backupSet) map[types.ContainerID]error {
 	cleanupImageIDs := make(map[types.ImageID]bool, len(containers))
 	failed := make(map[types.ContainerID]error, len(containers))
 
@@ -224,7 +246,7 @@ func restartContainersInSortedOrder(ctx context.Context, containers []types.Cont
 			continue
 		}
 		if stoppedImages[c.SafeImageID()] {
-			if err := restartStaleContainer(ctx, c, client, params); err != nil {
+			if err := restartStaleContainer(ctx, c, client, params, backups); err != nil {
 				failed[c.ID()] = err
 			} else if c.IsStale() {
 				// Only add (previously) stale containers' images to cleanup
@@ -240,7 +262,7 @@ func restartContainersInSortedOrder(ctx context.Context, containers []types.Cont
 	return failed
 }
 
-func cleanupImages(ctx context.Context, client container.Client, imageIDs map[types.ImageID]bool) {
+func cleanupImages(ctx context.Context, client containerpkg.Client, imageIDs map[types.ImageID]bool) {
 	for imageID := range imageIDs {
 		if imageID == "" {
 			continue
@@ -252,7 +274,7 @@ func cleanupImages(ctx context.Context, client container.Client, imageIDs map[ty
 }
 
 // rollBack recreates a container that could not be started with its new image from the image it used before
-func rollBack(ctx context.Context, container types.Container, client container.Client, startErr error) error {
+func rollBack(ctx context.Context, container types.Container, client containerpkg.Client, startErr error) error {
 	log.Warnf("Rolling %s back to its previous image", container.Name())
 	// A shutdown request must not leave the container half way through the rollback
 	if _, err := client.RollbackContainer(context.WithoutCancel(ctx), container); err != nil {
@@ -263,7 +285,7 @@ func rollBack(ctx context.Context, container types.Container, client container.C
 	return fmt.Errorf("%w (restored with the previous image)", startErr)
 }
 
-func restartStaleContainer(ctx context.Context, container types.Container, client container.Client, params types.UpdateParams) error {
+func restartStaleContainer(ctx context.Context, container types.Container, client containerpkg.Client, params types.UpdateParams, backups backupSet) error {
 	// Since we can't shutdown a watchtower container immediately, we need to
 	// start the new one while the old one is still running. This prevents us
 	// from re-using the same container name so we first rename the current
@@ -276,17 +298,60 @@ func restartStaleContainer(ctx context.Context, container types.Container, clien
 	}
 
 	if !params.NoRestart {
-		if newContainerID, err := client.StartContainer(ctx, container); err != nil {
+		backup, hasBackup := backups[container.ID()]
+
+		newContainerID, err := client.StartContainer(ctx, container)
+		if err == nil && hasBackup && params.HealthTimeout > 0 && container.IsRunning() {
+			err = client.WaitUntilHealthy(ctx, newContainerID, params.HealthTimeout)
+			if err != nil {
+				// The replacement started, but does not work. It has to go to make room for the previous version.
+				log.WithError(err).Errorf("The new version of %s does not work", container.Name())
+				if discardErr := client.DiscardContainer(ctx, newContainerID); discardErr != nil {
+					log.WithError(discardErr).Errorf("Could not remove the new version of %s", container.Name())
+					return fmt.Errorf("%w (the previous version could not be restored, as the new one could not be removed: %v)", err, discardErr)
+				}
+			}
+		}
+
+		if err != nil {
 			log.Error(err)
+			if hasBackup {
+				delete(backups, container.ID())
+				return restoreBackup(ctx, client, backup, err)
+			}
 			if params.RollbackOnFailure && !container.IsWatchtower() {
 				return rollBack(ctx, container, client, err)
 			}
 			return err
-		} else if container.ToRestart() && params.LifecycleHooks {
+		}
+
+		if hasBackup {
+			delete(backups, container.ID())
+			if err := client.RemoveBackup(ctx, backup); err != nil {
+				log.WithError(err).Warnf("Could not remove the previous version of %s (%s), remove it manually", container.Name(), backup.BackupName)
+			}
+		}
+
+		if container.ToRestart() && params.LifecycleHooks {
 			lifecycle.ExecutePostUpdateCommand(ctx, client, newContainerID)
 		}
 	}
 	return nil
+}
+
+// backupSet holds the containers that were set aside while their replacements are started, by container ID.
+// It is nil when the replace strategy is not in use.
+type backupSet map[types.ContainerID]types.ContainerBackup
+
+// restoreBackup puts the previous version of a container back after its replacement failed
+func restoreBackup(ctx context.Context, client containerpkg.Client, backup types.ContainerBackup, cause error) error {
+	log.Warnf("Restoring the previous version of %s", backup.OriginalName)
+	if err := client.RestoreContainer(ctx, backup); err != nil {
+		log.WithError(err).Errorf("Could not restore %s: the previous version is still available as %s", backup.OriginalName, backup.BackupName)
+		return fmt.Errorf("%w (restoring the previous version failed too: %v)", cause, err)
+	}
+	log.Infof("The previous version of %s was restored", backup.OriginalName)
+	return fmt.Errorf("%w (the previous version was restored)", cause)
 }
 
 // UpdateImplicitRestart iterates through the passed containers, setting the
