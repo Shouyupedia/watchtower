@@ -2,10 +2,6 @@ version: 2
 
 project_name: watchtower
 
-before:
-  hooks:
-    - go mod tidy
-
 builds:
   - id: watchtower
     main: ./main.go
@@ -47,13 +43,12 @@ sboms:
 signs:
   - cmd: cosign
     artifacts: checksum
+    signature: ${artifact}.sigstore.json
     args:
       - sign-blob
       - --yes
-      - --output-signature=${signature}
-      - --output-certificate=${certificate}
+      - --bundle=${signature}
       - ${artifact}
-    certificate: ${artifact}.pem
 
 dockers:
   - id: amd64

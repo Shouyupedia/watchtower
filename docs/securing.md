@@ -72,7 +72,7 @@ Credentials passed through `REPO_USER` and `REPO_PASS`, or a Docker `config.json
 
 ## Notifications
 
-E-mail notifications always use TLS (implicit TLS on port 465, STARTTLS otherwise) and the server certificate is always verified.
+E-mail notifications set up with the `--notification-email-*` options always ask for TLS (implicit TLS on port 465, STARTTLS otherwise), and the server certificate is always verified. Note that the notification library only warns, and carries on unencrypted, if a server on another port does not offer STARTTLS at all. Use port 465 if your mail server supports it, as implicit TLS cannot be downgraded that way.
 
 Notification URLs and tokens can contain secrets. They are visible in the container's environment, so prefer passing them as files (Docker secrets) where the option supports it. The startup message only lists the names of the notification services, never their URLs. Trace logging, however, prints sensitive information such as registry credentials and tokens: never leave `--trace` enabled in production.
 

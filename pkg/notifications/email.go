@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -13,7 +14,23 @@ import (
 
 const (
 	emailType = "email"
+
+	removedSkipVerifyEnv = "WATCHTOWER_NOTIFICATION_EMAIL_SERVER_TLS_SKIP_VERIFY"
 )
+
+// checkRemovedSkipVerify refuses to start if certificate verification for the mail server was disabled through
+// the removed option, rather than silently verifying certificates the configuration expected to be skipped.
+// Leaving it set to false is harmless and only warned about.
+func checkRemovedSkipVerify(value string) {
+	if value == "" {
+		return
+	}
+	if skip, err := strconv.ParseBool(value); err == nil && !skip {
+		log.Warnf("%s is no longer supported and can be removed: the SMTP server certificate is always verified", removedSkipVerifyEnv)
+		return
+	}
+	log.Fatalf("%s is no longer supported: the SMTP server must present a trusted TLS certificate", removedSkipVerifyEnv)
+}
 
 type emailTypeNotifier struct {
 	From, To               string
@@ -35,9 +52,7 @@ func newEmailNotifier(c *cobra.Command) t.ConvertibleNotifier {
 	if port < 1 || port > 65535 {
 		log.Fatalf("Invalid SMTP server port %d", port)
 	}
-	if _, set := os.LookupEnv("WATCHTOWER_NOTIFICATION_EMAIL_SERVER_TLS_SKIP_VERIFY"); set {
-		log.Fatal("WATCHTOWER_NOTIFICATION_EMAIL_SERVER_TLS_SKIP_VERIFY is no longer supported: the SMTP server must present a trusted TLS certificate")
-	}
+	checkRemovedSkipVerify(os.Getenv(removedSkipVerifyEnv))
 	delay, _ := flags.GetInt("notification-email-delay")
 
 	n := &emailTypeNotifier{

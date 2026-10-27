@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+dist
+site
+docs
+*.bundle
+*.out
+*.coverprofile
+watchtower
+watchtower.exe

@@ -61,7 +61,7 @@ outputs timestamp and log level.
     To skip sending notifications that do not contain any information, you can wrap your template with `{{if .}}` and `{{end}}`.
 
 
-The connection to the mail server is always encrypted and the server certificate is always verified: port `465` uses implicit TLS, any other port uses STARTTLS. There is no option to skip certificate verification.
+Watchtower always asks for an encrypted connection to the mail server and always verifies its certificate: port `465` uses implicit TLS, any other port uses STARTTLS. There is no option to skip certificate verification. A server that does not offer STARTTLS at all is still used unencrypted (with a warning), so prefer port `465` where possible.
 
 Example:
 
