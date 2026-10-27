@@ -3,12 +3,7 @@ To contribute code changes to this project you will need the following developme
  * [Go](https://golang.org/doc/install)
  * [Docker](https://docs.docker.com/engine/installation/)
  
-As watchtower utilizes go modules for vendor locking, you'll need at least Go 1.11.
-You can check your current version of the go language as follows:
-```bash
-  ~ $ go version
-  go version go1.12.1 darwin/amd64
-```
+The Go version to use is the one in `go.mod`; check yours with `go version`.
 
 
 ## Checking out the code
@@ -24,6 +19,13 @@ watchtower is a go application and is built with go commands. The following comm
 go build                               # compiles and packages an executable binary, watchtower
 go test ./... -v                       # runs tests with verbose output
 ./watchtower                           # runs the application (outside of a container)
+```
+
+### Integration tests
+The tests in `test/integration` run watchtower against a real Docker daemon (the one `DOCKER_HOST` points to).
+They create containers and images with names starting with `wtit-` and remove them afterwards, and need no registry.
+```bash
+go test -tags integration -count=1 -v ./test/integration/
 ```
 
 If you dont have it enabled, you'll either have to prefix each command with `GO111MODULE=on` or run `export GO111MODULE=on` before running the commands. [You can read more about modules here.](https://github.com/golang/go/wiki/Modules)
