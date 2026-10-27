@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 )
 
 const (

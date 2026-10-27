@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 
 	shoutrrrSmtp "github.com/containrrr/shoutrrr/pkg/services/smtp"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	t "github.com/shouyupedia/watchtower/pkg/types"
-	log "github.com/sirupsen/logrus"
 )
 
 const (

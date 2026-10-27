@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 
 	"github.com/shouyupedia/watchtower/internal/actions"
 	"github.com/shouyupedia/watchtower/pkg/types"
@@ -17,7 +17,7 @@ import (
 
 func TestActions(t *testing.T) {
 	RegisterFailHandler(Fail)
-	logrus.SetOutput(GinkgoWriter)
+	log.SetOutput(GinkgoWriter)
 	RunSpecs(t, "Actions Suite")
 }
 

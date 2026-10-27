@@ -10,11 +10,11 @@ import (
 	cli "github.com/docker/docker/client"
 	"github.com/onsi/gomega/gbytes"
 	"github.com/onsi/gomega/ghttp"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/shouyupedia/watchtower/internal/util"
 	"github.com/shouyupedia/watchtower/pkg/container/mocks"
 	"github.com/shouyupedia/watchtower/pkg/filters"
 	t "github.com/shouyupedia/watchtower/pkg/types"
-	"github.com/sirupsen/logrus"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -115,7 +115,7 @@ var _ = Describe("the client", func() {
 				mockServer.AppendHandlers(mocks.RemoveImageHandler(images))
 				c := dockerClient{api: docker}
 
-				resetLogrus, logbuf := captureLogrus(logrus.DebugLevel)
+				resetLogrus, logbuf := captureLogrus(log.DebugLevel)
 				defer resetLogrus()
 
 				Expect(c.RemoveImageByID(context.Background(), t.ImageID(imageA))).To(Succeed())
@@ -257,7 +257,7 @@ var _ = Describe("the client", func() {
 				}
 
 				// Capture logrus output in buffer
-				resetLogrus, logbuf := captureLogrus(logrus.DebugLevel)
+				resetLogrus, logbuf := captureLogrus(log.DebugLevel)
 				defer resetLogrus()
 
 				user := ""
@@ -336,19 +336,19 @@ var _ = Describe("the client", func() {
 })
 
 // Capture logrus output in buffer
-func captureLogrus(level logrus.Level) (func(), *gbytes.Buffer) {
+func captureLogrus(level log.Level) (func(), *gbytes.Buffer) {
 
 	logbuf := gbytes.NewBuffer()
 
-	origOut := logrus.StandardLogger().Out
-	logrus.SetOutput(logbuf)
+	origOut := log.Output()
+	log.SetOutput(logbuf)
 
-	origLev := logrus.StandardLogger().Level
-	logrus.SetLevel(level)
+	origLev := log.GetLevel()
+	log.SetLevel(level)
 
 	return func() {
-		logrus.SetOutput(origOut)
-		logrus.SetLevel(origLev)
+		log.SetOutput(origOut)
+		log.SetLevel(origLev)
 	}, logbuf
 }
 

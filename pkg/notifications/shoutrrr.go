@@ -11,12 +11,12 @@ import (
 
 	"github.com/containrrr/shoutrrr"
 	"github.com/containrrr/shoutrrr/pkg/types"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/shouyupedia/watchtower/pkg/notifications/templates"
 	t "github.com/shouyupedia/watchtower/pkg/types"
-	log "github.com/sirupsen/logrus"
 )
 
-// LocalLog is a logrus logger that does not send entries as notifications
+// LocalLog is a logger that does not send entries as notifications
 var LocalLog = log.WithField("notify", "no")
 
 const (
@@ -31,7 +31,7 @@ type router interface {
 	Send(message string, params *types.Params) []error
 }
 
-// Implements Notifier, logrus.Hook
+// Implements Notifier, logging.Hook
 type shoutrrrTypeNotifier struct {
 	Urls           []string
 	Router         router
@@ -98,7 +98,7 @@ func createNotifier(urls []string, level log.Level, tplString string, legacy boo
 	if stdout {
 		logger = stdlog.New(os.Stdout, ``, 0)
 	} else {
-		logger = stdlog.New(log.StandardLogger().WriterLevel(log.TraceLevel), "Shoutrrr: ", 0)
+		logger = log.Default().StdLogger("Shoutrrr: ", log.TraceLevel)
 	}
 	r, err := shoutrrr.NewSender(logger, urls...)
 	if err != nil {
@@ -221,7 +221,7 @@ func (n *shoutrrrTypeNotifier) Levels() []log.Level {
 	return log.AllLevels[:n.logLevel+1]
 }
 
-// Fire is the hook that logrus calls on a new log message
+// Fire is the hook that the logger calls on a new log message
 func (n *shoutrrrTypeNotifier) Fire(entry *log.Entry) error {
 	if entry.Data["notify"] == "no" {
 		// Skip logging if explicitly tagged as non-notify

@@ -3,9 +3,9 @@ package lifecycle
 import (
 	"context"
 
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/shouyupedia/watchtower/pkg/container"
 	"github.com/shouyupedia/watchtower/pkg/types"
-	log "github.com/sirupsen/logrus"
 )
 
 // ExecutePreChecks tries to run the pre-check lifecycle hook for all of the supplied containers.

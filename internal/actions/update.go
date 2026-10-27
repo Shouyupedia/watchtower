@@ -7,12 +7,12 @@ import (
 	containerpkg "github.com/shouyupedia/watchtower/pkg/container"
 	"sync"
 
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/shouyupedia/watchtower/internal/util"
 	"github.com/shouyupedia/watchtower/pkg/lifecycle"
 	"github.com/shouyupedia/watchtower/pkg/session"
 	"github.com/shouyupedia/watchtower/pkg/sorter"
 	"github.com/shouyupedia/watchtower/pkg/types"
-	log "github.com/sirupsen/logrus"
 )
 
 // Update looks at the running Docker containers to see if any of the images

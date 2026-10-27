@@ -12,10 +12,10 @@ import (
 	"strings"
 
 	ref "github.com/distribution/reference"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/shouyupedia/watchtower/pkg/registry/helpers"
 	"github.com/shouyupedia/watchtower/pkg/registry/httpclient"
 	"github.com/shouyupedia/watchtower/pkg/types"
-	"github.com/sirupsen/logrus"
 )
 
 // ChallengeHeader is the HTTP Header containing challenge instructions
@@ -35,11 +35,11 @@ func GetToken(ctx context.Context, container types.Container, registryAuth strin
 	}
 
 	URL := GetChallengeURL(normalizedRef)
-	logrus.WithField("URL", URL.String()).Debug("Built challenge URL")
+	log.WithField("URL", URL.String()).Debug("Built challenge URL")
 
 	v, cached := challenges.get(URL.Host)
 	if cached {
-		logrus.WithField("header", v).Debug("Using cached challenge")
+		log.WithField("header", v).Debug("Using cached challenge")
 	} else {
 		if v, err = fetchChallenge(ctx, URL); err != nil {
 			return "", err
@@ -77,7 +77,7 @@ func fetchChallenge(ctx context.Context, URL url.URL) (string, error) {
 	defer func() { _ = res.Body.Close() }()
 	v := res.Header.Get(ChallengeHeader)
 
-	logrus.WithFields(logrus.Fields{
+	log.WithFields(log.Fields{
 		"status": res.Status,
 		"header": v,
 	}).Debug("Got response to challenge request")
@@ -104,7 +104,7 @@ func GetBearerHeader(ctx context.Context, challenge string, imageRef ref.Named, 
 
 	cacheKey := tokenCacheKey(authURL.String(), registryAuth)
 	if header, found := tokens.get(cacheKey); found {
-		logrus.Debug("Using cached token")
+		log.Debug("Using cached token")
 		return header, nil
 	}
 
@@ -114,12 +114,12 @@ func GetBearerHeader(ctx context.Context, challenge string, imageRef ref.Named, 
 	}
 
 	if registryAuth != "" {
-		logrus.Debug("Credentials found.")
+		log.Debug("Credentials found.")
 		// CREDENTIAL: Uncomment to log registry credentials
-		// logrus.Tracef("Credentials: %v", registryAuth)
+		// log.Tracef("Credentials: %v", registryAuth)
 		r.Header.Add("Authorization", fmt.Sprintf("Basic %s", registryAuth))
 	} else {
-		logrus.Debug("No credentials found.")
+		log.Debug("No credentials found.")
 	}
 
 	authResponse, err := httpclient.Get().Do(r)
@@ -171,7 +171,7 @@ func GetAuthURL(challenge string, imageRef ref.Named) (*url.URL, error) {
 		values[strings.ToLower(m[1])] = val
 	}
 
-	logrus.WithFields(logrus.Fields{
+	log.WithFields(log.Fields{
 		"realm":   values["realm"],
 		"service": values["service"],
 	}).Debug("Checking challenge header content")
@@ -198,7 +198,7 @@ func GetAuthURL(challenge string, imageRef ref.Named) (*url.URL, error) {
 	scopeImage := ref.Path(imageRef)
 
 	scope := fmt.Sprintf("repository:%s:pull", scopeImage)
-	logrus.WithFields(logrus.Fields{"scope": scope, "image": imageRef.Name()}).Debug("Setting scope for auth token")
+	log.WithFields(log.Fields{"scope": scope, "image": imageRef.Name()}).Debug("Setting scope for auth token")
 	q.Add("scope", scope)
 
 	authURL.RawQuery = q.Encode()

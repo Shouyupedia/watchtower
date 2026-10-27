@@ -9,41 +9,41 @@ import (
 	"github.com/onsi/gomega/gbytes"
 	"github.com/shouyupedia/watchtower/internal/actions/mocks"
 	"github.com/shouyupedia/watchtower/internal/flags"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	s "github.com/shouyupedia/watchtower/pkg/session"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
-var allButTrace = logrus.DebugLevel
+var allButTrace = log.DebugLevel
 
 var legacyMockData = Data{
-	Entries: []*logrus.Entry{
+	Entries: []*log.Entry{
 		{
-			Level:   logrus.InfoLevel,
+			Level:   log.InfoLevel,
 			Message: "foo Bar",
 		},
 	},
 }
 
 var mockDataMultipleEntries = Data{
-	Entries: []*logrus.Entry{
+	Entries: []*log.Entry{
 		{
-			Level:   logrus.InfoLevel,
+			Level:   log.InfoLevel,
 			Message: "The situation is under control",
 		},
 		{
-			Level:   logrus.WarnLevel,
+			Level:   log.WarnLevel,
 			Message: "All the smoke might be covering up some problems",
 		},
 		{
-			Level:   logrus.ErrorLevel,
+			Level:   log.ErrorLevel,
 			Message: "Turns out everything is on fire",
 		},
 	},
 }
 
 var mockDataAllFresh = Data{
-	Entries: []*logrus.Entry{},
+	Entries: []*log.Entry{},
 	Report:  mocks.CreateMockProgressReport(s.FreshState),
 }
 
@@ -65,12 +65,9 @@ var _ = Describe("Shoutrrr", func() {
 
 	BeforeEach(func() {
 		logBuffer = gbytes.NewBuffer()
-		logrus.SetOutput(logBuffer)
-		logrus.SetLevel(logrus.TraceLevel)
-		logrus.SetFormatter(&logrus.TextFormatter{
-			DisableColors:    true,
-			DisableTimestamp: true,
-		})
+		log.SetOutput(logBuffer)
+		log.SetLevel(log.TraceLevel)
+		log.Configure(log.Options{Format: log.FormatLogfmt})
 	})
 
 	When("passing a common template name", func() {
@@ -86,22 +83,22 @@ updt1 (mock/updt1:latest): Updated
 	When("adding a log hook", func() {
 		When("it has not been added before", func() {
 			It("should be added to the logrus hooks", func() {
-				level := logrus.TraceLevel
-				hooksBefore := len(logrus.StandardLogger().Hooks[level])
+				level := log.TraceLevel
+				hooksBefore := log.HookCount(level)
 				shoutrrr := createNotifier([]string{}, level, "", true, StaticData{}, false, time.Second)
 				shoutrrr.AddLogHook()
-				hooksAfter := len(logrus.StandardLogger().Hooks[level])
+				hooksAfter := log.HookCount(level)
 				Expect(hooksAfter).To(BeNumerically(">", hooksBefore))
 			})
 		})
 		When("it is being added a second time", func() {
 			It("should not be added to the logrus hooks", func() {
-				level := logrus.TraceLevel
+				level := log.TraceLevel
 				shoutrrr := createNotifier([]string{}, level, "", true, StaticData{}, false, time.Second)
 				shoutrrr.AddLogHook()
-				hooksBefore := len(logrus.StandardLogger().Hooks[level])
+				hooksBefore := log.HookCount(level)
 				shoutrrr.AddLogHook()
-				hooksAfter := len(logrus.StandardLogger().Hooks[level])
+				hooksAfter := log.HookCount(level)
 				Expect(hooksAfter).To(Equal(hooksBefore))
 			})
 		})
@@ -114,9 +111,9 @@ updt1 (mock/updt1:latest): Updated
 				cmd := new(cobra.Command)
 				flags.RegisterNotificationFlags(cmd)
 
-				shoutrrr := createNotifier([]string{}, logrus.TraceLevel, "", true, StaticData{}, false, time.Second)
+				shoutrrr := createNotifier([]string{}, log.TraceLevel, "", true, StaticData{}, false, time.Second)
 
-				entries := []*logrus.Entry{
+				entries := []*log.Entry{
 					{
 						Message: "foo bar",
 					},
@@ -140,9 +137,9 @@ updt1 (mock/updt1:latest): Updated
 					legacyTemplate: true,
 				}
 
-				entries := []*logrus.Entry{
+				entries := []*log.Entry{
 					{
-						Level:   logrus.InfoLevel,
+						Level:   log.InfoLevel,
 						Message: "foo bar",
 					},
 				}
@@ -280,7 +277,7 @@ Turns out everything is on fire
 				shoutrrr := createNotifier([]string{"logger://"}, allButTrace, "", true, StaticData{}, false, time.Duration(0))
 				shoutrrr.AddLogHook()
 				shoutrrr.StartNotification()
-				logrus.Info("This log message is sponsored by ContainrrrVPN")
+				log.Info("This log message is sponsored by ContainrrrVPN")
 				shoutrrr.SendNotification(nil)
 				Eventually(logBuffer).Should(gbytes.Say(`Shoutrrr: This log message is sponsored by ContainrrrVPN`))
 			})
@@ -349,7 +346,7 @@ func sendNotificationsWithBlockingRouter(legacy bool) (*shoutrrrTypeNotifier, *b
 		delay:          time.Duration(0),
 	}
 
-	entry := &logrus.Entry{
+	entry := &log.Entry{
 		Message: "foo bar",
 	}
 

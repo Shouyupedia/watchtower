@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -126,7 +126,7 @@ func TestIsFile(t *testing.T) {
 }
 
 func TestProcessFlagAliases(t *testing.T) {
-	logrus.StandardLogger().ExitFunc = func(_ int) { t.FailNow() }
+	defer log.SetExitFunc(func(_ int) { t.FailNow() })()
 	cmd := new(cobra.Command)
 	SetDefaults()
 	RegisterDockerFlags(cmd)
@@ -187,29 +187,27 @@ func TestLogFormatFlag(t *testing.T) {
 	// Ensure the default value is Auto
 	require.NoError(t, cmd.ParseFlags([]string{}))
 	require.NoError(t, SetupLogging(cmd.Flags()))
-	assert.IsType(t, &logrus.TextFormatter{}, logrus.StandardLogger().Formatter)
+	assert.Equal(t, log.Options{Format: log.FormatAuto}, log.CurrentOptions())
 
 	// Test JSON format
 	require.NoError(t, cmd.ParseFlags([]string{`--log-format`, `JSON`}))
 	require.NoError(t, SetupLogging(cmd.Flags()))
-	assert.IsType(t, &logrus.JSONFormatter{}, logrus.StandardLogger().Formatter)
+	assert.Equal(t, log.FormatJSON, log.CurrentOptions().Format)
 
 	// Test Pretty format
 	require.NoError(t, cmd.ParseFlags([]string{`--log-format`, `pretty`}))
 	require.NoError(t, SetupLogging(cmd.Flags()))
-	assert.IsType(t, &logrus.TextFormatter{}, logrus.StandardLogger().Formatter)
-	textFormatter, ok := (logrus.StandardLogger().Formatter).(*logrus.TextFormatter)
-	assert.True(t, ok)
-	assert.True(t, textFormatter.ForceColors)
-	assert.False(t, textFormatter.FullTimestamp)
+	assert.Equal(t, log.Options{Format: log.FormatPretty}, log.CurrentOptions())
+
+	// Colors can be turned off
+	require.NoError(t, cmd.ParseFlags([]string{`--log-format`, `pretty`, `--no-color`}))
+	require.NoError(t, SetupLogging(cmd.Flags()))
+	assert.Equal(t, log.Options{Format: log.FormatPretty, NoColor: true}, log.CurrentOptions())
 
 	// Test LogFmt format
 	require.NoError(t, cmd.ParseFlags([]string{`--log-format`, `logfmt`}))
 	require.NoError(t, SetupLogging(cmd.Flags()))
-	textFormatter, ok = (logrus.StandardLogger().Formatter).(*logrus.TextFormatter)
-	assert.True(t, ok)
-	assert.True(t, textFormatter.DisableColors)
-	assert.True(t, textFormatter.FullTimestamp)
+	assert.Equal(t, log.FormatLogfmt, log.CurrentOptions().Format)
 
 	// Test invalid format
 	require.NoError(t, cmd.ParseFlags([]string{`--log-format`, `cowsay`}))
@@ -229,7 +227,7 @@ func TestLogLevelFlag(t *testing.T) {
 }
 
 func TestProcessFlagAliasesSchedAndInterval(t *testing.T) {
-	logrus.StandardLogger().ExitFunc = func(_ int) { panic(`FATAL`) }
+	defer log.SetExitFunc(func(_ int) { panic(`FATAL`) })()
 	cmd := new(cobra.Command)
 	SetDefaults()
 	RegisterDockerFlags(cmd)
@@ -263,7 +261,7 @@ func TestProcessFlagAliasesScheduleFromEnvironment(t *testing.T) {
 }
 
 func TestProcessFlagAliasesInvalidPorcelaineVersion(t *testing.T) {
-	logrus.StandardLogger().ExitFunc = func(_ int) { panic(`FATAL`) }
+	defer log.SetExitFunc(func(_ int) { panic(`FATAL`) })()
 	cmd := new(cobra.Command)
 	SetDefaults()
 	RegisterDockerFlags(cmd)

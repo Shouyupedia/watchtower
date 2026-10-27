@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"strings"
 
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/shouyupedia/watchtower/internal/meta"
 	"github.com/shouyupedia/watchtower/pkg/registry/auth"
 	"github.com/shouyupedia/watchtower/pkg/registry/httpclient"
 	"github.com/shouyupedia/watchtower/pkg/registry/manifest"
 	"github.com/shouyupedia/watchtower/pkg/types"
-	"github.com/sirupsen/logrus"
 )
 
 // ContentDigestHeader is the key for the key-value pair containing the digest header
@@ -43,18 +43,18 @@ func CompareDigest(ctx context.Context, container types.Container, registryAuth 
 		return false, err
 	}
 
-	logrus.WithField("remote", digest).Debug("Found a remote digest to compare with")
+	log.WithField("remote", digest).Debug("Found a remote digest to compare with")
 
 	for _, dig := range container.ImageInfo().RepoDigests {
 		_, localDigest, found := strings.Cut(dig, "@")
 		if !found {
 			continue
 		}
-		fields := logrus.Fields{"local": localDigest, "remote": digest}
-		logrus.WithFields(fields).Debug("Comparing")
+		fields := log.Fields{"local": localDigest, "remote": digest}
+		log.WithFields(fields).Debug("Comparing")
 
 		if localDigest == digest {
-			logrus.Debug("Found a match")
+			log.Debug("Found a match")
 			return true, nil
 		}
 	}
@@ -93,7 +93,7 @@ func GetDigest(ctx context.Context, url string, token string) (string, error) {
 	req.Header.Set("User-Agent", meta.UserAgent)
 
 	// CREDENTIAL: Uncomment to log the request token
-	// logrus.WithField("token", token).Trace("Setting request token")
+	// log.WithField("token", token).Trace("Setting request token")
 
 	req.Header.Add("Authorization", token)
 	req.Header.Add("Accept", "application/vnd.docker.distribution.manifest.v2+json")
@@ -102,7 +102,7 @@ func GetDigest(ctx context.Context, url string, token string) (string, error) {
 	req.Header.Add("Accept", "application/vnd.oci.image.index.v1+json")
 	req.Header.Add("Accept", "application/vnd.oci.image.manifest.v1+json")
 
-	logrus.WithField("url", url).Debug("Doing a HEAD request to fetch a digest")
+	log.WithField("url", url).Debug("Doing a HEAD request to fetch a digest")
 
 	res, err := httpclient.Get().Do(req)
 	if err != nil {

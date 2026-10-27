@@ -1,7 +1,7 @@
 package registry_test
 
 import (
-	"github.com/sirupsen/logrus"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -10,6 +10,6 @@ import (
 
 func TestRegistry(t *testing.T) {
 	RegisterFailHandler(Fail)
-	logrus.SetOutput(GinkgoWriter)
+	log.SetOutput(GinkgoWriter)
 	RunSpecs(t, "Registry Suite")
 }

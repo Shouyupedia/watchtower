@@ -40,7 +40,8 @@ You can customize the message posted by setting a template.
 -   `--notification-template` (env. `WATCHTOWER_NOTIFICATION_TEMPLATE`): The template used for the message.
 
 The template is a Go [template](https://golang.org/pkg/text/template/) that either format a list
-of [log entries](https://pkg.go.dev/github.com/sirupsen/logrus?tab=doc#Entry) or a `notification.Data` struct.
+of log entries or a `notification.Data` struct. A log entry has the fields `.Time` (a `time.Time`), `.Level` (`panic`,
+`fatal`, `error`, `warning`, `info`, `debug` or `trace`), `.Message` and `.Data` (a map with the fields of the entry).
 
 Simple templates are used unless the `notification-report` flag is specified:
 

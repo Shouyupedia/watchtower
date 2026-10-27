@@ -13,6 +13,7 @@ import (
 	"github.com/robfig/cron/v3"
 	"github.com/shouyupedia/watchtower/internal/actions"
 	"github.com/shouyupedia/watchtower/internal/flags"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/shouyupedia/watchtower/internal/meta"
 	"github.com/shouyupedia/watchtower/pkg/api"
 	apiMetrics "github.com/shouyupedia/watchtower/pkg/api/metrics"
@@ -23,7 +24,6 @@ import (
 	"github.com/shouyupedia/watchtower/pkg/notifications"
 	"github.com/shouyupedia/watchtower/pkg/registry/httpclient"
 	t "github.com/shouyupedia/watchtower/pkg/types"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/spf13/cobra"
 )
@@ -333,11 +333,11 @@ func writeStartupMessage(c *cobra.Command, sched time.Time, filtering string) {
 	noStartupMessage, _ := c.PersistentFlags().GetBool("no-startup-message")
 	enableUpdateAPI, _ := c.PersistentFlags().GetBool("http-api-update")
 
-	var startupLog *log.Entry
+	var startupLog *log.Logger
 	if noStartupMessage {
 		startupLog = notifications.LocalLog
 	} else {
-		startupLog = log.NewEntry(log.StandardLogger())
+		startupLog = log.Default()
 		// Batch up startup messages to send them as a single notification
 		notifier.StartNotification()
 	}

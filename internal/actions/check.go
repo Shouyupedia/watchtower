@@ -11,7 +11,7 @@ import (
 	"github.com/shouyupedia/watchtower/pkg/sorter"
 	"github.com/shouyupedia/watchtower/pkg/types"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 )
 
 // CheckForSanity makes sure everything is sane before starting
@@ -75,7 +75,7 @@ func cleanupExcessWatchtowers(ctx context.Context, containers []types.Container,
 
 		if cleanup {
 			if err := client.RemoveImageByID(ctx, c.ImageID()); err != nil {
-				log.WithError(err).Warning("Could not cleanup watchtower images, possibly because of other watchtowers instances in other scopes.")
+				log.WithError(err).Warn("Could not cleanup watchtower images, possibly because of other watchtowers instances in other scopes.")
 			}
 		}
 	}

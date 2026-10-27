@@ -17,7 +17,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	sdkClient "github.com/docker/docker/client"
-	log "github.com/sirupsen/logrus"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 

@@ -5,9 +5,9 @@ import (
 
 	ref "github.com/distribution/reference"
 	"github.com/docker/docker/api/types/image"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/shouyupedia/watchtower/pkg/registry/helpers"
 	watchtowerTypes "github.com/shouyupedia/watchtower/pkg/types"
-	log "github.com/sirupsen/logrus"
 )
 
 // GetPullOptions creates a struct with all options needed for pulling images from a registry

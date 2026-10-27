@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/containrrr/shoutrrr/pkg/types"
-	"github.com/sirupsen/logrus"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 )
 
 type recordingRouter struct {
@@ -29,7 +29,7 @@ func newTestNotifier(t *testing.T, tpl string) (*shoutrrrTypeNotifier, *recordin
 		Router:   router,
 		messages: make(chan string, 1),
 		done:     make(chan bool),
-		logLevel: logrus.InfoLevel,
+		logLevel: log.InfoLevel,
 		params:   &types.Params{},
 	}
 	tplParsed, err := getShoutrrrTemplate(tpl, true)
@@ -50,7 +50,7 @@ func TestNotifierIsSafeForConcurrentLogging(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 50; j++ {
-				_ = n.Fire(&logrus.Entry{Level: logrus.InfoLevel, Message: "msg"})
+				_ = n.Fire(&log.Entry{Level: log.InfoLevel, Message: "msg"})
 			}
 		}()
 	}
@@ -71,7 +71,7 @@ func TestFireAfterCloseDoesNotPanic(t *testing.T) {
 			t.Fatalf("logging after Close panicked: %v", r)
 		}
 	}()
-	_ = n.Fire(&logrus.Entry{Level: logrus.InfoLevel, Message: "late"})
+	_ = n.Fire(&log.Entry{Level: log.InfoLevel, Message: "late"})
 	n.Close() // closing twice must be harmless too
 }
 
@@ -80,11 +80,9 @@ func TestTemplateErrorIsNotFatal(t *testing.T) {
 	n, _ := newTestNotifier(t, "{{ .Missing.Field }}")
 
 	exited := make(chan struct{})
-	oldExit := logrus.StandardLogger().ExitFunc
-	logrus.StandardLogger().ExitFunc = func(int) { close(exited) }
-	defer func() { logrus.StandardLogger().ExitFunc = oldExit }()
+	defer log.SetExitFunc(func(int) { close(exited) })()
 
-	n.sendEntries([]*logrus.Entry{{Level: logrus.InfoLevel, Message: "x"}}, nil)
+	n.sendEntries([]*log.Entry{{Level: log.InfoLevel, Message: "x"}}, nil)
 
 	select {
 	case <-exited:

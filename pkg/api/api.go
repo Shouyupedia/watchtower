@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 )
 
 const tokenMissingMsg = //nolint:gosec // an error message, not a credential

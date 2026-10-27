@@ -12,7 +12,7 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
-	log "github.com/sirupsen/logrus"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 
 	t "github.com/shouyupedia/watchtower/pkg/types"
 )

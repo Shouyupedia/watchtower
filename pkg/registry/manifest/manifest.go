@@ -6,9 +6,9 @@ import (
 	url2 "net/url"
 
 	ref "github.com/distribution/reference"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/shouyupedia/watchtower/pkg/registry/helpers"
 	"github.com/shouyupedia/watchtower/pkg/types"
-	"github.com/sirupsen/logrus"
 )
 
 // BuildManifestURL from raw image data
@@ -25,7 +25,7 @@ func BuildManifestURL(container types.Container) (string, error) {
 	host, _ := helpers.GetRegistryAddress(normalizedTaggedRef.Name())
 	img, tag := ref.Path(normalizedTaggedRef), normalizedTaggedRef.Tag()
 
-	logrus.WithFields(logrus.Fields{
+	log.WithFields(log.Fields{
 		"image":      img,
 		"tag":        tag,
 		"normalized": normalizedTaggedRef.Name(),

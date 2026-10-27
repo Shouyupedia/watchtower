@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -670,30 +670,12 @@ func SetupLogging(f *pflag.FlagSet) error {
 	logFormat, _ := f.GetString(`log-format`)
 	noColor, _ := f.GetBool("no-color")
 
-	switch strings.ToLower(logFormat) {
-	case "auto":
-		// This will either use the "pretty" or "logfmt" format, based on whether the standard out is connected to a TTY
-		log.SetFormatter(&log.TextFormatter{
-			DisableColors: noColor,
-			// enable logrus built-in support for https://bixense.com/clicolors/
-			EnvironmentOverrideColors: true,
-		})
-	case "json":
-		log.SetFormatter(&log.JSONFormatter{})
-	case "logfmt":
-		log.SetFormatter(&log.TextFormatter{
-			DisableColors: true,
-			FullTimestamp: true,
-		})
-	case "pretty":
-		log.SetFormatter(&log.TextFormatter{
-			// "Pretty" format combined with `--no-color` will only change the timestamp to the time since start
-			ForceColors:   !noColor,
-			FullTimestamp: false,
-		})
-	default:
+	// "auto" uses the "pretty" format if the output is a terminal and "logfmt" otherwise
+	format, ok := log.ParseFormat(logFormat)
+	if !ok {
 		return fmt.Errorf("invalid log format: %s", logFormat)
 	}
+	log.Configure(log.Options{Format: format, NoColor: noColor})
 
 	rawLogLevel, _ := f.GetString(`log-level`)
 	if logLevel, err := log.ParseLevel(rawLogLevel); err != nil {

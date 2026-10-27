@@ -11,7 +11,7 @@ type logEntry struct {
 	Level   LogLevel
 }
 
-// LogLevel is the analog of logrus.Level
+// LogLevel is the analog of logging.Level
 type LogLevel string
 
 const (

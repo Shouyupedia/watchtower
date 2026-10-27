@@ -10,9 +10,9 @@ import (
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerimage "github.com/docker/docker/api/types/image"
 	"github.com/docker/go-connections/nat"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/shouyupedia/watchtower/internal/util"
 	wt "github.com/shouyupedia/watchtower/pkg/types"
-	"github.com/sirupsen/logrus"
 )
 
 // NewContainer returns a new Container instance instantiated with the
@@ -145,7 +145,7 @@ func (c Container) IsNoPull(params wt.UpdateParams) bool {
 func (c Container) getContainerOrGlobalBool(globalVal bool, label string, contPrecedence bool) bool {
 	if contVal, err := c.getBoolLabelValue(label); err != nil {
 		if !errors.Is(err, errorLabelNotFound) {
-			logrus.WithField("error", err).WithField("label", label).Warn("Failed to parse label value")
+			log.WithField("error", err).WithField("label", label).Warn("Failed to parse label value")
 		}
 		return globalVal
 	} else {

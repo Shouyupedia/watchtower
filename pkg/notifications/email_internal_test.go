@@ -3,15 +3,13 @@ package notifications
 import (
 	"testing"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestCheckRemovedSkipVerify(t *testing.T) {
 	exited := false
-	oldExit := logrus.StandardLogger().ExitFunc
-	logrus.StandardLogger().ExitFunc = func(int) { exited = true }
-	defer func() { logrus.StandardLogger().ExitFunc = oldExit }()
+	defer log.SetExitFunc(func(int) { exited = true })()
 
 	for value, wantExit := range map[string]bool{
 		"":      false,

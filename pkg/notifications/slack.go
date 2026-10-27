@@ -5,8 +5,8 @@ import (
 
 	shoutrrrDisco "github.com/containrrr/shoutrrr/pkg/services/discord"
 	shoutrrrSlack "github.com/containrrr/shoutrrr/pkg/services/slack"
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	t "github.com/shouyupedia/watchtower/pkg/types"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 

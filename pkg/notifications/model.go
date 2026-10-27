@@ -1,8 +1,8 @@
 package notifications
 
 import (
+	log "github.com/shouyupedia/watchtower/internal/logging"
 	t "github.com/shouyupedia/watchtower/pkg/types"
-	log "github.com/sirupsen/logrus"
 )
 
 // StaticData is the part of the notification template data model set upon initialization
