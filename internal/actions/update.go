@@ -292,8 +292,9 @@ func restartStaleContainer(ctx context.Context, container types.Container, clien
 	// instance so that the new one can adopt the old name.
 	if container.IsWatchtower() {
 		if err := client.RenameContainer(ctx, container, util.RandName()); err != nil {
+			// The new instance cannot take the name, so it is not started. That is not a success.
 			log.Error(err)
-			return nil
+			return fmt.Errorf("could not rename the running watchtower to make room for its update: %w", err)
 		}
 	}
 

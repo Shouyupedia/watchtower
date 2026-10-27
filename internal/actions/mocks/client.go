@@ -37,6 +37,8 @@ type TestData struct {
 	FailPreserve   map[string]bool
 	FailHealth     map[string]bool
 	FailRestore    map[string]bool
+	// FailRename makes RenameContainer fail for the containers with these names
+	FailRename map[string]bool
 	// Events is the order in which the replace strategy operations were called, as "operation:name"
 	Events []string
 }
@@ -141,7 +143,10 @@ func (client MockClient) RollbackContainer(_ context.Context, c t.Container) (t.
 }
 
 // RenameContainer is a mock method
-func (client MockClient) RenameContainer(_ context.Context, _ t.Container, _ string) error {
+func (client MockClient) RenameContainer(_ context.Context, c t.Container, _ string) error {
+	if client.TestData.FailRename[c.Name()] {
+		return errors.New("failed to rename the container")
+	}
 	return nil
 }
 
