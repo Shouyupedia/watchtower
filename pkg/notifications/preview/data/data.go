@@ -27,7 +27,7 @@ type staticData struct {
 // New initializes a new preview data struct
 func New() *previewData {
 	return &previewData{
-		rand:           rand.New(rand.NewSource(1)),
+		rand:           rand.New(rand.NewSource(1)), //nolint:gosec // deterministic preview data
 		lastTime:       time.Now().Add(-30 * time.Minute),
 		report:         nil,
 		containerCount: 0,
@@ -47,9 +47,10 @@ func (pb *previewData) AddFromState(state State) {
 	name := pb.generateName()
 	image := pb.generateImageName(name)
 	var err error
-	if state == FailedState {
+	switch state {
+	case FailedState:
 		err = errors.New(pb.randomEntry(errorMessages))
-	} else if state == SkippedState {
+	case SkippedState:
 		err = errors.New(pb.randomEntry(skippedMessages))
 	}
 	pb.addContainer(containerStatus{

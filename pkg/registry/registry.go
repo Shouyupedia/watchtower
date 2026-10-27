@@ -1,10 +1,10 @@
 package registry
 
 import (
-	"github.com/shouyupedia/watchtower/pkg/registry/helpers"
-	watchtowerTypes "github.com/shouyupedia/watchtower/pkg/types"
 	ref "github.com/distribution/reference"
 	"github.com/docker/docker/api/types"
+	"github.com/shouyupedia/watchtower/pkg/registry/helpers"
+	watchtowerTypes "github.com/shouyupedia/watchtower/pkg/types"
 	log "github.com/sirupsen/logrus"
 )
 

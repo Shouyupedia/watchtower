@@ -345,6 +345,33 @@ Environment Variable: WATCHTOWER_HTTP_API_TOKEN
              Default: -
 ```
 
+## HTTP API listen address
+Address the HTTP API listens on. Use e.g. `127.0.0.1:8080` to only accept local connections.
+
+```text
+            Argument: --http-api-listen
+Environment Variable: WATCHTOWER_HTTP_API_LISTEN
+             Type: String
+          Default: :8080
+```
+
+## HTTP API TLS
+Serve the HTTP API over HTTPS. Both the certificate and the key (PEM files) have to be supplied. Without them the API token is sent in clear text, so only do that on trusted networks or behind a TLS terminating proxy.
+
+```text
+            Argument: --http-api-tls-cert
+Environment Variable: WATCHTOWER_HTTP_API_TLS_CERT
+             Type: String
+          Default: -
+```
+
+```text
+            Argument: --http-api-tls-key
+Environment Variable: WATCHTOWER_HTTP_API_TLS_KEY
+             Type: String
+          Default: -
+```
+
 ## HTTP API periodic polls
 Keep running periodic updates if the HTTP API mode is enabled, otherwise the HTTP API would prevent periodic polls.  
 
@@ -435,6 +462,16 @@ requests and may rate limit pull requests (mainly docker.io).
 Environment Variable: WATCHTOWER_WARN_ON_HEAD_FAILURE
      Possible values: always, auto, never
              Default: auto
+```
+
+## Registry TLS verification
+Disable TLS certificate verification for the registry requests that watchtower makes itself (the token and digest lookups used to decide whether an image needs to be pulled). Certificates are verified by default. Only enable this for registries using self-signed certificates, as credentials and digests can otherwise be intercepted or forged. The image pull itself is performed by the Docker daemon and is not affected.
+
+```text
+            Argument: --registry-tls-skip-verify
+Environment Variable: WATCHTOWER_REGISTRY_TLS_SKIP_VERIFY
+                Type: Boolean
+             Default: false
 ```
 
 ## Health check

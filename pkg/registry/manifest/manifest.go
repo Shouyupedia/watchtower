@@ -5,9 +5,9 @@ import (
 	"fmt"
 	url2 "net/url"
 
+	ref "github.com/distribution/reference"
 	"github.com/shouyupedia/watchtower/pkg/registry/helpers"
 	"github.com/shouyupedia/watchtower/pkg/types"
-	ref "github.com/distribution/reference"
 	"github.com/sirupsen/logrus"
 )
 

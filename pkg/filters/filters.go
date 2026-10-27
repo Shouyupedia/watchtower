@@ -108,7 +108,7 @@ func FilterByImage(images []string, baseFilter t.Filter) t.Filter {
 	}
 
 	return func(c t.FilterableContainer) bool {
-		image := strings.Split(c.ImageName(), ":")[0]
+		image := imageWithoutTag(c.ImageName())
 		for _, targetImage := range images {
 			if image == targetImage {
 				return baseFilter(c)
@@ -178,4 +178,15 @@ func BuildFilter(names []string, disableNames []string, enableLabel bool, scope 
 	}
 
 	return filter, filterDesc
+}
+
+// imageWithoutTag strips the tag and digest from an image name, leaving registry ports intact
+func imageWithoutTag(name string) string {
+	if at := strings.Index(name, "@"); at >= 0 {
+		name = name[:at]
+	}
+	if colon := strings.LastIndex(name, ":"); colon > strings.LastIndex(name, "/") {
+		return name[:colon]
+	}
+	return name
 }

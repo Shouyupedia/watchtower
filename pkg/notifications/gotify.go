@@ -51,7 +51,7 @@ func getGotifyURL(flags *pflag.FlagSet) string {
 
 	if len(gotifyURL) < 1 {
 		log.Fatal("Required argument --notification-gotify-url(cli) or WATCHTOWER_NOTIFICATION_GOTIFY_URL(env) is empty.")
-	} else if !(strings.HasPrefix(gotifyURL, "http://") || strings.HasPrefix(gotifyURL, "https://")) {
+	} else if !strings.HasPrefix(gotifyURL, "http://") && !strings.HasPrefix(gotifyURL, "https://") {
 		log.Fatal("Gotify URL must start with \"http://\" or \"https://\"")
 	} else if strings.HasPrefix(gotifyURL, "http://") {
 		log.Warn("Using an HTTP url for Gotify is insecure")

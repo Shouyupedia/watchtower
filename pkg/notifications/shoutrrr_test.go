@@ -4,12 +4,12 @@ import (
 	"time"
 
 	"github.com/containrrr/shoutrrr/pkg/types"
-	"github.com/shouyupedia/watchtower/internal/actions/mocks"
-	"github.com/shouyupedia/watchtower/internal/flags"
-	s "github.com/shouyupedia/watchtower/pkg/session"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gbytes"
+	"github.com/shouyupedia/watchtower/internal/actions/mocks"
+	"github.com/shouyupedia/watchtower/internal/flags"
+	s "github.com/shouyupedia/watchtower/pkg/session"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )

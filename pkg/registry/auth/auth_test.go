@@ -1,20 +1,25 @@
 package auth_test
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/shouyupedia/watchtower/internal/actions/mocks"
 	"github.com/shouyupedia/watchtower/pkg/registry/auth"
+	"github.com/shouyupedia/watchtower/pkg/registry/httpclient"
 
-	wtTypes "github.com/shouyupedia/watchtower/pkg/types"
 	ref "github.com/distribution/reference"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	wtTypes "github.com/shouyupedia/watchtower/pkg/types"
 )
 
 func TestAuth(t *testing.T) {
@@ -58,7 +63,7 @@ var _ = Describe("the auth module", func() {
 		It("should parse the token from the response",
 			SkipIfCredentialsEmpty(GHCRCredentials, func() {
 				creds := fmt.Sprintf("%s:%s", GHCRCredentials.Username, GHCRCredentials.Password)
-				token, err := auth.GetToken(mockContainer, creds)
+				token, err := auth.GetToken(context.Background(), mockContainer, creds)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(token).NotTo(Equal(""))
 			}),
@@ -127,6 +132,79 @@ var _ = Describe("the auth module", func() {
 			res, err := auth.GetAuthURL(input, imageRef)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res).NotTo(BeNil())
+		})
+	})
+
+	Describe("GetAuthURL hardening", func() {
+		imageRef, _ := ref.ParseNormalizedNamed("ghcr.io/user/image")
+
+		It("should preserve the case of the realm path", func() {
+			challenge := `Bearer realm="https://auth.example.com/Token/V2",service="Registry"`
+			URL, err := auth.GetAuthURL(challenge, imageRef)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(URL.Path).To(Equal("/Token/V2"))
+			Expect(URL.Query().Get("service")).To(Equal("Registry"))
+		})
+		It("should reject a realm that is not served over https", func() {
+			challenge := `Bearer realm="http://auth.example.com/token",service="registry"`
+			URL, err := auth.GetAuthURL(challenge, imageRef)
+			Expect(err).To(HaveOccurred())
+			Expect(URL).To(BeNil())
+		})
+		It("should return an error instead of crashing on a malformed realm", func() {
+			challenge := `Bearer realm="://%zz",service="registry"`
+			Expect(func() { _, _ = auth.GetAuthURL(challenge, imageRef) }).NotTo(Panic())
+			_, err := auth.GetAuthURL(challenge, imageRef)
+			Expect(err).To(HaveOccurred())
+		})
+		It("should reject a realm without a host", func() {
+			_, err := auth.GetAuthURL(`Bearer realm="/token",service="registry"`, imageRef)
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Describe("GetBearerHeader", func() {
+		imageRef, _ := ref.ParseNormalizedNamed("ghcr.io/user/image")
+		var server *httptest.Server
+		AfterEach(func() {
+			httpclient.SetInsecureSkipVerify(false)
+			if server != nil {
+				server.Close()
+			}
+		})
+
+		challengeFor := func(s *httptest.Server) string {
+			return fmt.Sprintf(`Bearer realm="%s/token",service="registry"`, s.URL)
+		}
+
+		It("should fetch a token and accept the access_token field", func() {
+			server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(`{"access_token":"abc"}`))
+			}))
+			httpclient.SetInsecureSkipVerify(true)
+			header, err := auth.GetBearerHeader(context.Background(), challengeFor(server), imageRef, "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(header).To(Equal("Bearer abc"))
+		})
+		It("should not send credentials to a token server with an untrusted certificate", func() {
+			var hits atomic.Int32
+			server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				_, _ = w.Write([]byte(`{"token":"abc"}`))
+			}))
+			_, err := auth.GetBearerHeader(context.Background(), challengeFor(server), imageRef, "dXNlcjpwYXNz")
+			Expect(err).To(HaveOccurred())
+			Expect(hits.Load()).To(BeZero())
+		})
+		It("should fail on a non-200 response or an empty token", func() {
+			server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("service") == "registry" {
+					w.WriteHeader(http.StatusUnauthorized)
+				}
+			}))
+			httpclient.SetInsecureSkipVerify(true)
+			_, err := auth.GetBearerHeader(context.Background(), challengeFor(server), imageRef, "")
+			Expect(err).To(HaveOccurred())
 		})
 	})
 

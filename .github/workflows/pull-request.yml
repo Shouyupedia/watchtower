@@ -31,8 +31,8 @@ jobs:
         with:
           version: v2.5.0
 
-  security:
-    name: Security scan
+  vulncheck:
+    name: Vulnerability scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -45,8 +45,6 @@ jobs:
           go-version-file: go.mod
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
-      - name: gosec
-        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.22.9 -exclude-dir=tplprev -severity medium -confidence medium ./...
 
   test:
     name: Test

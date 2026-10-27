@@ -5,11 +5,11 @@ import (
 	"net/url"
 	"time"
 
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 	"github.com/shouyupedia/watchtower/cmd"
 	"github.com/shouyupedia/watchtower/internal/flags"
 	"github.com/shouyupedia/watchtower/pkg/notifications"
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("notifications", func() {
@@ -28,7 +28,7 @@ var _ = Describe("notifications", func() {
 
 			Expect(notif.GetNames()).To(BeEmpty())
 		})
-		When("title is overriden in flag", func() {
+		When("title is overridden in flag", func() {
 			It("should use the specified hostname in the title", func() {
 				command := cmd.NewRootCommand()
 				flags.RegisterNotificationFlags(command)

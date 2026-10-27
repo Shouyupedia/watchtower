@@ -9,9 +9,9 @@ import (
 	"github.com/shouyupedia/watchtower/internal/actions"
 	"github.com/shouyupedia/watchtower/pkg/types"
 
-	. "github.com/shouyupedia/watchtower/internal/actions/mocks"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	. "github.com/shouyupedia/watchtower/internal/actions/mocks"
 )
 
 func TestActions(t *testing.T) {

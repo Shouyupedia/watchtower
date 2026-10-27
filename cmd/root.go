@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"errors"
 	"math"
-	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -11,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/robfig/cron"
 	"github.com/shouyupedia/watchtower/internal/actions"
 	"github.com/shouyupedia/watchtower/internal/flags"
 	"github.com/shouyupedia/watchtower/internal/meta"
@@ -21,8 +20,8 @@ import (
 	"github.com/shouyupedia/watchtower/pkg/filters"
 	"github.com/shouyupedia/watchtower/pkg/metrics"
 	"github.com/shouyupedia/watchtower/pkg/notifications"
+	"github.com/shouyupedia/watchtower/pkg/registry/httpclient"
 	t "github.com/shouyupedia/watchtower/pkg/types"
-	"github.com/robfig/cron"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/spf13/cobra"
@@ -111,6 +110,11 @@ func PreRun(cmd *cobra.Command, _ []string) {
 		log.Fatal(err)
 	}
 
+	if skipVerify, _ := f.GetBool("registry-tls-skip-verify"); skipVerify {
+		log.Warn("TLS certificate verification for registry requests is disabled. Credentials and digests can be intercepted or forged.")
+		httpclient.SetInsecureSkipVerify(true)
+	}
+
 	noPull, _ = f.GetBool("no-pull")
 	includeStopped, _ := f.GetBool("include-stopped")
 	includeRestarting, _ := f.GetBool("include-restarting")
@@ -180,6 +184,9 @@ func Run(c *cobra.Command, names []string) {
 	updateLock <- true
 
 	httpAPI := api.New(apiToken)
+	httpAPI.Addr, _ = c.PersistentFlags().GetString("http-api-listen")
+	httpAPI.TLSCertFile, _ = c.PersistentFlags().GetString("http-api-tls-cert")
+	httpAPI.TLSKeyFile, _ = c.PersistentFlags().GetString("http-api-tls-key")
 
 	if enableUpdateAPI {
 		updateHandler := update.New(func(images []string) {
@@ -199,15 +206,18 @@ func Run(c *cobra.Command, names []string) {
 		httpAPI.RegisterHandler(metricsHandler.Path, metricsHandler.Handle)
 	}
 
-	if err := httpAPI.Start(enableUpdateAPI && !unblockHTTPAPI); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Error("failed to start API", err)
+	if err := httpAPI.Start(enableUpdateAPI && !unblockHTTPAPI); err != nil {
+		log.Fatalf("Failed to start the HTTP API: %v", err)
 	}
 
-	if err := runUpgradesOnSchedule(c, filter, filterDesc, updateLock); err != nil {
+	err := runUpgradesOnSchedule(c, filter, filterDesc, updateLock)
+	httpAPI.Shutdown()
+	if err != nil {
 		log.Error(err)
+		os.Exit(1)
 	}
 
-	os.Exit(1)
+	os.Exit(0)
 }
 
 func logNotifyExit(err error) {
@@ -295,8 +305,8 @@ func writeStartupMessage(c *cobra.Command, sched time.Time, filtering string) {
 	}
 
 	if enableUpdateAPI {
-		// TODO: make listen port configurable
-		startupLog.Info("The HTTP API is enabled at :8080.")
+		listen, _ := c.PersistentFlags().GetString("http-api-listen")
+		startupLog.Info("The HTTP API is enabled at " + listen + ".")
 	}
 
 	if !noStartupMessage {

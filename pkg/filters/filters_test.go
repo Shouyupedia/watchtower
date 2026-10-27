@@ -331,3 +331,19 @@ func TestBuildFilterDisableContainer(t *testing.T) {
 	assert.False(t, filter(container))
 	container.AssertExpectations(t)
 }
+
+func TestFilterByImageKeepsRegistryPorts(t *testing.T) {
+	filter := FilterByImage([]string{"registry.local:5000/team/app"}, NoFilter)
+
+	withTag := &mocks.FilterableContainer{}
+	withTag.On("ImageName").Return("registry.local:5000/team/app:1.2.3")
+	assert.True(t, filter(withTag))
+
+	other := &mocks.FilterableContainer{}
+	other.On("ImageName").Return("registry.local:5000/team/other:1.2.3")
+	assert.False(t, filter(other))
+
+	digest := &mocks.FilterableContainer{}
+	digest.On("ImageName").Return("registry.local:5000/team/app@sha256:abc")
+	assert.True(t, filter(digest))
+}

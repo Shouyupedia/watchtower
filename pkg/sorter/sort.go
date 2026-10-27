@@ -17,17 +17,17 @@ func (c ByCreated) Swap(i, j int) { c[i], c[j] = c[j], c[i] }
 // Less will compare two elements (identified by index) in the Container
 // list by created-date.
 func (c ByCreated) Less(i, j int) bool {
-	t1, err := time.Parse(time.RFC3339Nano, c[i].ContainerInfo().Created)
-	if err != nil {
-		t1 = time.Now()
-	}
+	return parseCreated(c[i]).Before(parseCreated(c[j]))
+}
 
-	t2, _ := time.Parse(time.RFC3339Nano, c[j].ContainerInfo().Created)
+// parseCreated returns the creation time of the container, or the zero time if it cannot be determined.
+// Using a fixed fallback (instead of the current time) keeps the ordering consistent between comparisons.
+func parseCreated(c types.Container) time.Time {
+	created, err := time.Parse(time.RFC3339Nano, c.ContainerInfo().Created)
 	if err != nil {
-		t1 = time.Now()
+		return time.Time{}
 	}
-
-	return t1.Before(t2)
+	return created
 }
 
 // SortByDependencies will sort the list of containers taking into account any

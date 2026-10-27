@@ -1,14 +1,20 @@
 package digest_test
 
 import (
+	"context"
+	"encoding/base64"
 	"fmt"
-	"github.com/shouyupedia/watchtower/internal/actions/mocks"
-	"github.com/shouyupedia/watchtower/pkg/registry/digest"
-	wtTypes "github.com/shouyupedia/watchtower/pkg/types"
+	dockerTypes "github.com/docker/cli/cli/config/types"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/ghttp"
+	"github.com/shouyupedia/watchtower/internal/actions/mocks"
+	"github.com/shouyupedia/watchtower/pkg/registry"
+	"github.com/shouyupedia/watchtower/pkg/registry/digest"
+	"github.com/shouyupedia/watchtower/pkg/registry/httpclient"
+	wtTypes "github.com/shouyupedia/watchtower/pkg/types"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -65,7 +71,7 @@ var _ = Describe("Digests", func() {
 		It("should return true if digests match",
 			SkipIfCredentialsEmpty(GHCRCredentials, func() {
 				creds := fmt.Sprintf("%s:%s", GHCRCredentials.Username, GHCRCredentials.Password)
-				matches, err := digest.CompareDigest(mockContainer, creds)
+				matches, err := digest.CompareDigest(context.Background(), mockContainer, creds)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(matches).To(Equal(true))
 			}),
@@ -78,7 +84,7 @@ var _ = Describe("Digests", func() {
 
 		})
 		It("should return an error when container contains no image info", func() {
-			matches, err := digest.CompareDigest(mockContainerNoImage, `user:pass`)
+			matches, err := digest.CompareDigest(context.Background(), mockContainerNoImage, `user:pass`)
 			Expect(err).To(HaveOccurred())
 			Expect(matches).To(Equal(false))
 		})
@@ -116,10 +122,57 @@ var _ = Describe("Digests", func() {
 					}),
 				),
 			)
-			dig, err := digest.GetDigest(server.URL(), "token")
+			dig, err := digest.GetDigest(context.Background(), server.URL(), "token")
 			Expect(server.ReceivedRequests()).Should(HaveLen(1))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(dig).To(Equal(mockDigest))
+		})
+	})
+
+	When("sending a HEAD request to a TLS registry", func() {
+		var server *httptest.Server
+		BeforeEach(func() {
+			server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set(digest.ContentDigestHeader, mockDigest)
+			}))
+		})
+		AfterEach(func() {
+			httpclient.SetInsecureSkipVerify(false)
+			server.Close()
+		})
+		It("should refuse an untrusted certificate by default", func() {
+			_, err := digest.GetDigest(context.Background(), server.URL, "token")
+			Expect(err).To(HaveOccurred())
+		})
+		It("should accept an untrusted certificate when verification is explicitly disabled", func() {
+			httpclient.SetInsecureSkipVerify(true)
+			dig, err := digest.GetDigest(context.Background(), server.URL, "token")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(dig).To(Equal(mockDigest))
+		})
+	})
+
+	When("a registry responds without a digest header", func() {
+		It("should return an error", func() {
+			server := ghttp.NewServer()
+			defer server.Close()
+			server.AppendHandlers(ghttp.RespondWith(http.StatusOK, ""))
+			_, err := digest.GetDigest(context.Background(), server.URL(), "token")
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	When("transforming credentials", func() {
+		It("should convert what registry.EncodeAuth produces into a basic auth value", func() {
+			for _, password := range []string{"hunter2", "p>ss?", "s3cr3t~~", "a?b>c", "ÿÿÿ"} {
+				encoded, err := registry.EncodeAuth(dockerTypes.AuthConfig{Username: "user", Password: password})
+				Expect(err).NotTo(HaveOccurred())
+				want := base64.StdEncoding.EncodeToString([]byte("user:" + password))
+				Expect(digest.TransformAuth(encoded)).To(Equal(want), "password %q", password)
+			}
+		})
+		It("should leave values that are not encoded credentials untouched", func() {
+			Expect(digest.TransformAuth("user:pass")).To(Equal("user:pass"))
 		})
 	})
 })

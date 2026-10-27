@@ -2,6 +2,8 @@ package container
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -329,7 +331,7 @@ func (client dockerClient) IsContainerStale(container t.Container, params t.Upda
 }
 
 func (client dockerClient) HasNewImage(ctx context.Context, container t.Container) (hasNew bool, latestImage t.ImageID, err error) {
-	currentImageID := t.ImageID(container.ContainerInfo().ContainerJSONBase.Image)
+	currentImageID := t.ImageID(container.ContainerInfo().Image)
 	imageName := container.ImageName()
 
 	newImageInfo, _, err := client.api.ImageInspectWithRaw(ctx, imageName)
@@ -374,7 +376,7 @@ func (client dockerClient) PullImage(ctx context.Context, container t.Container)
 
 	log.WithFields(fields).Debugf("Checking if pull is needed")
 
-	if match, err := digest.CompareDigest(container, opts.RegistryAuth); err != nil {
+	if match, err := digest.CompareDigest(ctx, container, opts.RegistryAuth); err != nil {
 		headLevel := log.DebugLevel
 		if client.WarnOnHeadPullFailed(container) {
 			headLevel = log.WarnLevel
@@ -396,11 +398,25 @@ func (client dockerClient) PullImage(ctx context.Context, container t.Container)
 		return err
 	}
 
-	defer response.Close()
-	// the pull request will be aborted prematurely unless the response is read
-	if _, err = io.ReadAll(response); err != nil {
-		log.Error(err)
-		return err
+	defer func() { _ = response.Close() }()
+	// the pull request will be aborted prematurely unless the response is read,
+	// and failures are reported in-band as JSON messages rather than as an HTTP error
+	dec := json.NewDecoder(response)
+	for {
+		var msg struct {
+			Error string `json:"error"`
+		}
+		if err = dec.Decode(&msg); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			log.Error(err)
+			return err
+		}
+		if msg.Error != "" {
+			err = fmt.Errorf("pull of %s failed: %s", imageName, msg.Error)
+			log.Error(err)
+			return err
+		}
 	}
 	return nil
 }

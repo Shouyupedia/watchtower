@@ -5,6 +5,7 @@ import (
 	stdlog "log"
 	"os"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -40,6 +41,12 @@ type shoutrrrTypeNotifier struct {
 	data           StaticData
 	receiving      bool
 	delay          time.Duration
+
+	// mu guards entries, which is touched by the update flow as well as by every goroutine that logs
+	mu sync.Mutex
+	// closeMu makes sure nothing is sent on messages once it has been closed
+	closeMu sync.RWMutex
+	closed  bool
 }
 
 // GetScheme returns the scheme part of a Shoutrrr URL
@@ -153,11 +160,17 @@ func (n *shoutrrrTypeNotifier) sendEntries(entries []*log.Entry, report t.Report
 		// Log in go func in case we entered from Fire to avoid stalling
 		go func() {
 			if err != nil {
-				LocalLog.WithError(err).Fatal("Notification template error")
+				LocalLog.WithError(err).Error("Notification template error")
 			} else if len(n.Urls) > 1 {
 				LocalLog.Info("Skipping notification due to empty message")
 			}
 		}()
+		return
+	}
+
+	n.closeMu.RLock()
+	defer n.closeMu.RUnlock()
+	if n.closed {
 		return
 	}
 	n.messages <- msg
@@ -165,6 +178,8 @@ func (n *shoutrrrTypeNotifier) sendEntries(entries []*log.Entry, report t.Report
 
 // StartNotification begins queueing up messages to send them as a batch
 func (n *shoutrrrTypeNotifier) StartNotification() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	if n.entries == nil {
 		n.entries = make([]*log.Entry, 0, 10)
 	}
@@ -172,13 +187,24 @@ func (n *shoutrrrTypeNotifier) StartNotification() {
 
 // SendNotification sends the queued up messages as a notification
 func (n *shoutrrrTypeNotifier) SendNotification(report t.Report) {
-	n.sendEntries(n.entries, report)
+	n.mu.Lock()
+	entries := n.entries
 	n.entries = nil
+	n.mu.Unlock()
+
+	n.sendEntries(entries, report)
 }
 
 // Close prevents further messages from being queued and waits until all the currently queued up messages have been sent
 func (n *shoutrrrTypeNotifier) Close() {
+	n.closeMu.Lock()
+	if n.closed {
+		n.closeMu.Unlock()
+		return
+	}
+	n.closed = true
 	close(n.messages)
+	n.closeMu.Unlock()
 
 	// Use fmt so it doesn't trigger another notification.
 	LocalLog.Info("Waiting for the notification goroutine to finish")
@@ -197,12 +223,16 @@ func (n *shoutrrrTypeNotifier) Fire(entry *log.Entry) error {
 		// Skip logging if explicitly tagged as non-notify
 		return nil
 	}
+	n.mu.Lock()
 	if n.entries != nil {
 		n.entries = append(n.entries, entry)
-	} else {
-		// Log output generated outside a cycle is sent immediately.
-		n.sendEntries([]*log.Entry{entry}, nil)
+		n.mu.Unlock()
+		return nil
 	}
+	n.mu.Unlock()
+
+	// Log output generated outside a cycle is sent immediately.
+	n.sendEntries([]*log.Entry{entry}, nil)
 	return nil
 }
 

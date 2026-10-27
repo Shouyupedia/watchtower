@@ -1,25 +1,34 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
-	"github.com/shouyupedia/watchtower/pkg/registry/helpers"
-	"github.com/shouyupedia/watchtower/pkg/types"
 	ref "github.com/distribution/reference"
+	"github.com/shouyupedia/watchtower/pkg/registry/helpers"
+	"github.com/shouyupedia/watchtower/pkg/registry/httpclient"
+	"github.com/shouyupedia/watchtower/pkg/types"
 	"github.com/sirupsen/logrus"
 )
 
 // ChallengeHeader is the HTTP Header containing challenge instructions
 const ChallengeHeader = "WWW-Authenticate"
 
+// maxTokenResponseSize is the largest token response body that will be read from a registry
+const maxTokenResponseSize = 1 << 20
+
+// challengeParam matches a single key=value (or key="value") pair in a WWW-Authenticate header
+var challengeParam = regexp.MustCompile(`(\w+)\s*=\s*(?:"([^"]*)"|([^,\s]*))`)
+
 // GetToken fetches a token for the registry hosting the provided image
-func GetToken(container types.Container, registryAuth string) (string, error) {
+func GetToken(ctx context.Context, container types.Container, registryAuth string) (string, error) {
 	normalizedRef, err := ref.ParseNormalizedNamed(container.ImageName())
 	if err != nil {
 		return "", err
@@ -29,16 +38,15 @@ func GetToken(container types.Container, registryAuth string) (string, error) {
 	logrus.WithField("URL", URL.String()).Debug("Built challenge URL")
 
 	var req *http.Request
-	if req, err = GetChallengeRequest(URL); err != nil {
+	if req, err = GetChallengeRequest(ctx, URL); err != nil {
 		return "", err
 	}
 
-	client := &http.Client{}
 	var res *http.Response
-	if res, err = client.Do(req); err != nil {
+	if res, err = httpclient.Get().Do(req); err != nil {
 		return "", err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	v := res.Header.Get(ChallengeHeader)
 
 	logrus.WithFields(logrus.Fields{
@@ -46,24 +54,24 @@ func GetToken(container types.Container, registryAuth string) (string, error) {
 		"header": v,
 	}).Debug("Got response to challenge request")
 
-	challenge := strings.ToLower(v)
-	if strings.HasPrefix(challenge, "basic") {
+	scheme, _, _ := strings.Cut(strings.TrimSpace(v), " ")
+	switch strings.ToLower(scheme) {
+	case "basic":
 		if registryAuth == "" {
 			return "", fmt.Errorf("no credentials available")
 		}
 
 		return fmt.Sprintf("Basic %s", registryAuth), nil
-	}
-	if strings.HasPrefix(challenge, "bearer") {
-		return GetBearerHeader(challenge, normalizedRef, registryAuth)
+	case "bearer":
+		return GetBearerHeader(ctx, v, normalizedRef, registryAuth)
 	}
 
 	return "", errors.New("unsupported challenge type from registry")
 }
 
 // GetChallengeRequest creates a request for getting challenge instructions
-func GetChallengeRequest(URL url.URL) (*http.Request, error) {
-	req, err := http.NewRequest("GET", URL.String(), nil)
+func GetChallengeRequest(ctx context.Context, URL url.URL) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, URL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -73,16 +81,14 @@ func GetChallengeRequest(URL url.URL) (*http.Request, error) {
 }
 
 // GetBearerHeader tries to fetch a bearer token from the registry based on the challenge instructions
-func GetBearerHeader(challenge string, imageRef ref.Named, registryAuth string) (string, error) {
-	client := http.Client{}
+func GetBearerHeader(ctx context.Context, challenge string, imageRef ref.Named, registryAuth string) (string, error) {
 	authURL, err := GetAuthURL(challenge, imageRef)
-
 	if err != nil {
 		return "", err
 	}
 
 	var r *http.Request
-	if r, err = http.NewRequest("GET", authURL.String(), nil); err != nil {
+	if r, err = http.NewRequestWithContext(ctx, http.MethodGet, authURL.String(), nil); err != nil {
 		return "", err
 	}
 
@@ -95,46 +101,74 @@ func GetBearerHeader(challenge string, imageRef ref.Named, registryAuth string) 
 		logrus.Debug("No credentials found.")
 	}
 
-	var authResponse *http.Response
-	if authResponse, err = client.Do(r); err != nil {
+	authResponse, err := httpclient.Get().Do(r)
+	if err != nil {
 		return "", err
 	}
+	defer func() { _ = authResponse.Body.Close() }()
 
-	body, _ := io.ReadAll(authResponse.Body)
-	tokenResponse := &types.TokenResponse{}
+	if authResponse.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("token server responded with %q", authResponse.Status)
+	}
 
-	err = json.Unmarshal(body, tokenResponse)
+	body, err := io.ReadAll(io.LimitReader(authResponse.Body, maxTokenResponseSize))
 	if err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf("Bearer %s", tokenResponse.Token), nil
+	tokenResponse := &types.TokenResponse{}
+	if err = json.Unmarshal(body, tokenResponse); err != nil {
+		return "", err
+	}
+
+	token := tokenResponse.Token
+	if token == "" {
+		token = tokenResponse.AccessToken
+	}
+	if token == "" {
+		return "", errors.New("token server response did not contain a token")
+	}
+
+	return fmt.Sprintf("Bearer %s", token), nil
 }
 
 // GetAuthURL from the instructions in the challenge
 func GetAuthURL(challenge string, imageRef ref.Named) (*url.URL, error) {
-	loweredChallenge := strings.ToLower(challenge)
-	raw := strings.TrimPrefix(loweredChallenge, "bearer")
-
-	pairs := strings.Split(raw, ",")
-	values := make(map[string]string, len(pairs))
-
-	for _, pair := range pairs {
-		trimmed := strings.Trim(pair, " ")
-		if key, val, ok := strings.Cut(trimmed, "="); ok {
-			values[key] = strings.Trim(val, `"`)
-		}
+	raw := strings.TrimSpace(challenge)
+	if len(raw) >= len("bearer") && strings.EqualFold(raw[:len("bearer")], "bearer") {
+		raw = raw[len("bearer"):]
 	}
+
+	values := make(map[string]string)
+	for _, m := range challengeParam.FindAllStringSubmatch(raw, -1) {
+		val := m[2]
+		if val == "" {
+			val = m[3]
+		}
+		values[strings.ToLower(m[1])] = val
+	}
+
 	logrus.WithFields(logrus.Fields{
 		"realm":   values["realm"],
 		"service": values["service"],
 	}).Debug("Checking challenge header content")
 	if values["realm"] == "" || values["service"] == "" {
-
 		return nil, fmt.Errorf("challenge header did not include all values needed to construct an auth url")
 	}
 
-	authURL, _ := url.Parse(values["realm"])
+	authURL, err := url.Parse(values["realm"])
+	if err != nil {
+		return nil, fmt.Errorf("invalid realm in challenge header: %w", err)
+	}
+	if authURL.Host == "" {
+		return nil, fmt.Errorf("realm in challenge header has no host")
+	}
+	// The realm is controlled by the registry (or whoever sits in between), and credentials are sent to it.
+	// Never allow it to downgrade the connection unless certificate verification has been disabled on purpose.
+	if authURL.Scheme != "https" && (authURL.Scheme != "http" || !httpclient.InsecureSkipVerify()) {
+		return nil, fmt.Errorf("refusing to use non-https realm %q for token authentication", authURL.Scheme+"://"+authURL.Host)
+	}
+
 	q := authURL.Query()
 	q.Add("service", values["service"])
 

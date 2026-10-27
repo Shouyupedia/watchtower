@@ -170,6 +170,21 @@ func RegisterSystemFlags(rootCmd *cobra.Command) {
 		envString("WATCHTOWER_HTTP_API_TOKEN"),
 		"Sets an authentication token to HTTP API requests.")
 
+	flags.String(
+		"http-api-listen",
+		envString("WATCHTOWER_HTTP_API_LISTEN"),
+		"Address the HTTP API listens on, e.g. 127.0.0.1:8080")
+
+	flags.String(
+		"http-api-tls-cert",
+		envString("WATCHTOWER_HTTP_API_TLS_CERT"),
+		"Path to the TLS certificate (PEM) used to serve the HTTP API over HTTPS")
+
+	flags.String(
+		"http-api-tls-key",
+		envString("WATCHTOWER_HTTP_API_TLS_KEY"),
+		"Path to the TLS private key (PEM) used to serve the HTTP API over HTTPS")
+
 	flags.BoolP(
 		"http-api-periodic-polls",
 		"",
@@ -269,13 +284,6 @@ func RegisterNotificationFlags(rootCmd *cobra.Command) {
 		"",
 		envInt("WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PORT"),
 		"SMTP server port to send notification emails through")
-
-	flags.BoolP(
-		"notification-email-server-tls-skip-verify",
-		"",
-		envBool("WATCHTOWER_NOTIFICATION_EMAIL_SERVER_TLS_SKIP_VERIFY"),
-		`Controls whether watchtower verifies the SMTP server's certificate chain and host name.
-Should only be used for testing.`)
 
 	flags.StringP(
 		"notification-email-server-user",
@@ -380,6 +388,12 @@ Should only be used for testing.`)
 		envBool("WATCHTOWER_NOTIFICATION_SKIP_TITLE"),
 		"Do not pass the title param to notifications")
 
+	flags.Bool(
+		"registry-tls-skip-verify",
+		envBool("WATCHTOWER_REGISTRY_TLS_SKIP_VERIFY"),
+		`Disable TLS certificate verification for the registry requests watchtower makes itself
+(token and digest lookups). Insecure, only use for registries with self-signed certificates.`)
+
 	flags.String(
 		"warn-on-head-failure",
 		envString("WATCHTOWER_WARN_ON_HEAD_FAILURE"),
@@ -421,6 +435,7 @@ func SetDefaults() {
 	viper.AutomaticEnv()
 	viper.SetDefault("DOCKER_HOST", "unix:///var/run/docker.sock")
 	viper.SetDefault("DOCKER_API_VERSION", DockerAPIMinVersion)
+	viper.SetDefault("WATCHTOWER_HTTP_API_LISTEN", ":8080")
 	viper.SetDefault("WATCHTOWER_POLL_INTERVAL", defaultInterval)
 	viper.SetDefault("WATCHTOWER_TIMEOUT", time.Second*10)
 	viper.SetDefault("WATCHTOWER_NOTIFICATIONS", []string{})
@@ -664,7 +679,7 @@ func SetupLogging(f *pflag.FlagSet) error {
 
 	rawLogLevel, _ := f.GetString(`log-level`)
 	if logLevel, err := log.ParseLevel(rawLogLevel); err != nil {
-		return fmt.Errorf("invalid log level: %e", err)
+		return fmt.Errorf("invalid log level: %w", err)
 	} else {
 		log.SetLevel(logLevel)
 	}
