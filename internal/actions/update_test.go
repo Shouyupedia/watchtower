@@ -66,6 +66,16 @@ func getLinkedTestData(withImageInfo bool) *TestData {
 }
 
 var _ = Describe("the update action", func() {
+	It("returns a non-nil skipped report for dependency cycles", func() {
+		first := CreateMockContainerWithLinks("first", "/first", "fake:latest", time.Now(), []string{"/second"}, CreateMockImageInfo("first"))
+		second := CreateMockContainerWithLinks("second", "/second", "fake:latest", time.Now(), []string{"/first"}, CreateMockImageInfo("second"))
+		client := CreateMockClient(&TestData{Containers: []types.Container{first, second}}, false, false)
+		report, err := actions.Update(client, types.UpdateParams{})
+		Expect(err).To(HaveOccurred())
+		Expect(report).NotTo(BeNil())
+		Expect(report.Skipped()).To(HaveLen(2))
+		Expect(report.Updated()).To(BeEmpty())
+	})
 	When("watchtower has been instructed to clean up", func() {
 		When("there are multiple containers using the same image", func() {
 			It("should only try to remove the image once", func() {

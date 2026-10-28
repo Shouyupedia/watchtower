@@ -2,6 +2,13 @@ Watchtower provides an HTTP API mode that enables an HTTP endpoint that can be r
 
 -   `/v1/update` - triggers an update for all of the containers monitored by this Watchtower instance.
 
+The built-in listener uses HTTP. Bind it to loopback or a private network and use a TLS
+reverse proxy for remote clients; never send the bearer token over an untrusted plaintext
+connection. Replace example tokens with a unique secret. Request bodies are unused,
+discarded rather than logged, and limited to 64 KiB. Waiting image-specific requests
+are abandoned when the client disconnects. At most 16 image-specific requests may be
+pending or running per handler; additional requests receive HTTP 429.
+
 ---
 
 To enable this mode, use the flag `--http-api-update`. For example, in a Docker Compose config file:
@@ -25,7 +32,7 @@ services:
     labels:
       - "com.centurylinklabs.watchtower.enable=false"
     ports:
-      - 8080:8080
+      - 127.0.0.1:8080:8080
 ```
 
 By default, enabling this mode prevents periodic polls (i.e. what is specified using `--interval` or `--schedule`). To run periodic updates regardless, pass `--http-api-periodic-polls`.

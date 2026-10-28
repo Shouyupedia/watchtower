@@ -11,8 +11,9 @@ docker run -d \
   containrrr/watchtower
 ```
 
-If pulling images from private Docker registries, supply registry authentication credentials with the environment variables `REPO_USER` and `REPO_PASS`
-or by mounting the host's docker config file into the container (at the root of the container filesystem `/`).
+If pulling images from private Docker registries, supply registry authentication credentials with the environment variables `REPO_USER` and `REPO_PASS`.
+These credentials apply only to Docker Hub unless `REPO_HOST` is set to the exact registry `host[:port]`.
+Alternatively, mount the host's docker config file into the container (at the root of the container filesystem `/`).
 
 Passing environment variables:
 

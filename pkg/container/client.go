@@ -441,6 +441,15 @@ func (client dockerClient) RemoveImageByID(id t.ImageID) error {
 
 func (client dockerClient) ExecuteCommand(containerID t.ContainerID, command string, timeout int) (SkipUpdate bool, err error) {
 	bg := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		bg, cancel = context.WithTimeout(bg, time.Duration(timeout)*time.Minute)
+		defer cancel()
+	}
+	return client.executeCommand(bg, containerID, command)
+}
+
+func (client dockerClient) executeCommand(bg context.Context, containerID t.ContainerID, command string) (SkipUpdate bool, err error) {
 	clog := log.WithField("containerID", containerID)
 
 	// Create the exec
@@ -461,6 +470,18 @@ func (client dockerClient) ExecuteCommand(containerID t.ContainerID, command str
 	})
 	if attachErr != nil {
 		clog.Errorf("Failed to extract command exec logs: %v", attachErr)
+	} else {
+		defer response.Close()
+		done := make(chan struct{})
+		defer close(done)
+		// Closing the hijacked connection interrupts reads when the hook times out.
+		go func() {
+			select {
+			case <-bg.Done():
+				response.Close()
+			case <-done:
+			}
+		}()
 	}
 
 	// Run the exec
@@ -472,9 +493,15 @@ func (client dockerClient) ExecuteCommand(containerID t.ContainerID, command str
 
 	var output string
 	if attachErr == nil {
-		defer response.Close()
 		var writer bytes.Buffer
-		written, err := writer.ReadFrom(response.Reader)
+		const maxExecOutputBytes = 1024 * 1024
+		written, err := io.Copy(&writer, io.LimitReader(response.Reader, maxExecOutputBytes))
+		if err == nil {
+			_, err = io.Copy(io.Discard, response.Reader)
+		}
+		if bg.Err() != nil {
+			return true, bg.Err()
+		}
 		if err != nil {
 			clog.Error(err)
 		} else if written > 0 {
@@ -484,7 +511,7 @@ func (client dockerClient) ExecuteCommand(containerID t.ContainerID, command str
 
 	// Inspect the exec to get the exit code and print a message if the
 	// exit code is not success.
-	skipUpdate, err := client.waitForExecOrTimeout(bg, exec.ID, output, timeout)
+	skipUpdate, err := client.waitForExecOrTimeout(bg, exec.ID, output, 0)
 	if err != nil {
 		return true, err
 	}
@@ -505,6 +532,9 @@ func (client dockerClient) waitForExecOrTimeout(bg context.Context, ID string, e
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		execInspect, err := client.api.ContainerExecInspect(ctx, ID)
 
 		//goland:noinspection GoNilness
@@ -519,7 +549,11 @@ func (client dockerClient) waitForExecOrTimeout(bg context.Context, ID string, e
 			return false, err
 		}
 		if execInspect.Running {
-			time.Sleep(1 * time.Second)
+			select {
+			case <-ctx.Done():
+				return false, ctx.Err()
+			case <-time.After(time.Second):
+			}
 			continue
 		}
 		if len(execOutput) > 0 {

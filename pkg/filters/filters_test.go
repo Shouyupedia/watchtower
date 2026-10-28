@@ -69,6 +69,36 @@ func TestFilterByNamesRegex(t *testing.T) {
 	container.AssertExpectations(t)
 }
 
+func TestFilterByNamesRequiresCompleteName(t *testing.T) {
+	for _, tc := range []struct {
+		pattern string
+		name    string
+		want    bool
+	}{
+		{"app", "/app", true},
+		{"app", "app", true},
+		{"app", "/appx", false},
+		{"app", "xapp", false},
+		{"app", "", false},
+		{"app|db", "/dbx", false},
+		{"app|db", "/db", true},
+		{"app.*", "/appx", true},
+		{"/app", "/appx", false},
+	} {
+		t.Run(tc.pattern+"/"+tc.name, func(t *testing.T) {
+			container := new(mocks.FilterableContainer)
+			container.On("Name").Return(tc.name)
+			assert.Equal(t, tc.want, FilterByNames([]string{tc.pattern}, NoFilter)(container))
+		})
+	}
+}
+
+func TestDisableNamesHandlesEmptyName(t *testing.T) {
+	container := new(mocks.FilterableContainer)
+	container.On("Name").Return("")
+	assert.True(t, FilterByDisableNames([]string{"app"}, NoFilter)(container))
+}
+
 func TestFilterByEnableLabel(t *testing.T) {
 	filter := FilterByEnableLabel(NoFilter)
 	assert.NotNil(t, filter)

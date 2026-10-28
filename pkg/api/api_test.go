@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	token  = "123123123"
+	token = "123123123"
 )
 
 func TestAPI(t *testing.T) {
@@ -23,6 +23,13 @@ var _ = Describe("API", func() {
 	api := New(token)
 
 	Describe("RequireToken middleware", func() {
+		It("rejects an empty configured token", func() {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", "/hello", nil)
+			req.Header.Set("Authorization", "Bearer ")
+			New("").RequireToken(testHandler)(rec, req)
+			Expect(rec.Code).To(Equal(http.StatusUnauthorized))
+		})
 		It("should return 401 Unauthorized when token is not provided", func() {
 			handlerFunc := api.RequireToken(testHandler)
 
@@ -51,7 +58,7 @@ var _ = Describe("API", func() {
 
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest("GET", "/hello", nil)
-			req.Header.Set("Authorization", "Bearer " + token)
+			req.Header.Set("Authorization", "Bearer "+token)
 
 			handlerFunc(rec, req)
 

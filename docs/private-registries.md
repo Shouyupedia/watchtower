@@ -3,6 +3,11 @@ requires a valid username and password (i.e., _credentials_). In order to operat
 environment, watchtower needs to know the credentials to access the registry. 
 
 The credentials can be provided to watchtower in a configuration file called `config.json`.
+Environment credentials (`REPO_USER` and `REPO_PASS`) are restricted to Docker Hub by default.
+For another registry, set `REPO_HOST` to its exact `host[:port]` (without a scheme or path).
+These credentials are never used for other registries; configure their credentials separately
+in `config.json`. Registry authentication realms must use HTTPS with trusted certificates.
+
 There are two ways to generate this configuration file:
 
 *   The configuration file can be created manually.
