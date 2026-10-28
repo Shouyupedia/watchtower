@@ -279,7 +279,8 @@ func (c Container) StopSignal() string {
 // default options. To do this we have to compare the ContainerConfig for the
 // running container with the ContainerConfig from the image that container was
 // started from. This function returns a ContainerConfig which contains just
-// the options overridden at runtime.
+// the options overridden at runtime, except User: the existing identity is
+// preserved because inspection cannot distinguish an explicit user override.
 func (c Container) GetCreateConfig() *dockercontainer.Config {
 	config := c.containerInfo.Config
 	hostConfig := c.containerInfo.HostConfig
@@ -289,9 +290,8 @@ func (c Container) GetCreateConfig() *dockercontainer.Config {
 		config.WorkingDir = ""
 	}
 
-	if config.User == imageConfig.User {
-		config.User = ""
-	}
+	// Inspect cannot distinguish an explicit user from the old image default.
+	// Preserve the running identity rather than silently inheriting root.
 
 	if hostConfig.NetworkMode.IsContainer() {
 		config.Hostname = ""

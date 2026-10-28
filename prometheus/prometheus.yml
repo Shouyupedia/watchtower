@@ -2,6 +2,7 @@ scrape_configs:
   - job_name: watchtower
     scrape_interval: 5s
     metrics_path: /v1/metrics
+    # Local demo only; replace together with the Watchtower API token before deployment.
     bearer_token: demotoken
     static_configs:
       - targets:

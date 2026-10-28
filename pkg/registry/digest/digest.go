@@ -1,18 +1,16 @@
 package digest
 
 import (
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/containrrr/watchtower/internal/meta"
 	"github.com/containrrr/watchtower/pkg/registry/auth"
+	"github.com/containrrr/watchtower/pkg/registry/httpclient"
 	"github.com/containrrr/watchtower/pkg/registry/manifest"
 	"github.com/containrrr/watchtower/pkg/types"
 	"github.com/sirupsen/logrus"
@@ -76,22 +74,12 @@ func TransformAuth(registryAuth string) string {
 
 // GetDigest from registry using a HEAD request to prevent rate limiting
 func GetDigest(url string, token string) (string, error) {
-	tr := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
-	}
-	client := &http.Client{Transport: tr}
+	client := httpclient.New()
 
-	req, _ := http.NewRequest("HEAD", url, nil)
+	req, err := http.NewRequest("HEAD", url, nil)
+	if err != nil {
+		return "", err
+	}
 	req.Header.Set("User-Agent", meta.UserAgent)
 
 	if token == "" {

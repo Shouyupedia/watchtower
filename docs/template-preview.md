@@ -118,7 +118,7 @@
         const output = WATCHTOWER.tplprev(input, states, levels);
         console.log('Output: \n%o', output);
         if (output.startsWith('Error: ')) {
-            document.querySelector('#result').innerHTML = `<b>Error</b>: ${output.substring(7)}`;
+            document.querySelector('#result').textContent = output;
         } else if (output.length) {
             document.querySelector('#result').innerText = output;
         } else {

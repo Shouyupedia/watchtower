@@ -1,6 +1,7 @@
 package notifications
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -51,6 +52,9 @@ func newEmailNotifier(c *cobra.Command) t.ConvertibleNotifier {
 }
 
 func (e *emailTypeNotifier) GetURL(c *cobra.Command) (string, error) {
+	if e.tlsSkipVerify {
+		return "", fmt.Errorf("legacy email TLS verification cannot be disabled safely; configure a trusted SMTP certificate")
+	}
 	conf := &shoutrrrSmtp.Config{
 		FromAddress: e.From,
 		FromName:    "Watchtower",
@@ -59,7 +63,7 @@ func (e *emailTypeNotifier) GetURL(c *cobra.Command) (string, error) {
 		Host:        e.Server,
 		Username:    e.User,
 		Password:    e.Password,
-		UseStartTLS: !e.tlsSkipVerify,
+		UseStartTLS: true,
 		UseHTML:     false,
 		Encryption:  shoutrrrSmtp.EncMethods.Auto,
 		Auth:        shoutrrrSmtp.AuthTypes.None,
@@ -68,10 +72,6 @@ func (e *emailTypeNotifier) GetURL(c *cobra.Command) (string, error) {
 
 	if len(e.User) > 0 {
 		conf.Auth = shoutrrrSmtp.AuthTypes.Plain
-	}
-
-	if e.tlsSkipVerify {
-		conf.Encryption = shoutrrrSmtp.EncMethods.None
 	}
 
 	return conf.GetURL().String(), nil

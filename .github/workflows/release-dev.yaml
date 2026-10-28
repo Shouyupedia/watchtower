@@ -40,6 +40,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Publish to Docker Hub
         uses: jerray/publish-docker-action@87d84711629b0dc9f6bb127b568413cc92a2088e #master@2022-10-14
         with:

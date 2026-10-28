@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/containrrr/watchtower/pkg/registry/helpers"
+	"github.com/containrrr/watchtower/pkg/registry/httpclient"
 	"github.com/containrrr/watchtower/pkg/types"
 	ref "github.com/distribution/reference"
 	"github.com/sirupsen/logrus"
@@ -33,7 +34,7 @@ func GetToken(container types.Container, registryAuth string) (string, error) {
 		return "", err
 	}
 
-	client := &http.Client{}
+	client := httpclient.New()
 	var res *http.Response
 	if res, err = client.Do(req); err != nil {
 		return "", err
@@ -55,7 +56,7 @@ func GetToken(container types.Container, registryAuth string) (string, error) {
 		return fmt.Sprintf("Basic %s", registryAuth), nil
 	}
 	if strings.HasPrefix(challenge, "bearer") {
-		return GetBearerHeader(challenge, normalizedRef, registryAuth)
+		return GetBearerHeader(v, normalizedRef, registryAuth)
 	}
 
 	return "", errors.New("unsupported challenge type from registry")
@@ -74,7 +75,7 @@ func GetChallengeRequest(URL url.URL) (*http.Request, error) {
 
 // GetBearerHeader tries to fetch a bearer token from the registry based on the challenge instructions
 func GetBearerHeader(challenge string, imageRef ref.Named, registryAuth string) (string, error) {
-	client := http.Client{}
+	client := httpclient.New()
 	authURL, err := GetAuthURL(challenge, imageRef)
 
 	if err != nil {
@@ -88,8 +89,6 @@ func GetBearerHeader(challenge string, imageRef ref.Named, registryAuth string) 
 
 	if registryAuth != "" {
 		logrus.Debug("Credentials found.")
-		// CREDENTIAL: Uncomment to log registry credentials
-		// logrus.Tracef("Credentials: %v", registryAuth)
 		r.Header.Add("Authorization", fmt.Sprintf("Basic %s", registryAuth))
 	} else {
 		logrus.Debug("No credentials found.")
@@ -99,13 +98,27 @@ func GetBearerHeader(challenge string, imageRef ref.Named, registryAuth string) 
 	if authResponse, err = client.Do(r); err != nil {
 		return "", err
 	}
+	defer authResponse.Body.Close()
+	if authResponse.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("token endpoint returned %s", authResponse.Status)
+	}
 
-	body, _ := io.ReadAll(authResponse.Body)
+	const maxTokenResponseBytes = 1024 * 1024
+	body, err := io.ReadAll(io.LimitReader(authResponse.Body, maxTokenResponseBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(body) > maxTokenResponseBytes {
+		return "", fmt.Errorf("token response exceeds size limit")
+	}
 	tokenResponse := &types.TokenResponse{}
 
 	err = json.Unmarshal(body, tokenResponse)
 	if err != nil {
 		return "", err
+	}
+	if tokenResponse.Token == "" {
+		return "", fmt.Errorf("token endpoint returned an empty token")
 	}
 
 	return fmt.Sprintf("Bearer %s", tokenResponse.Token), nil
@@ -113,8 +126,10 @@ func GetBearerHeader(challenge string, imageRef ref.Named, registryAuth string) 
 
 // GetAuthURL from the instructions in the challenge
 func GetAuthURL(challenge string, imageRef ref.Named) (*url.URL, error) {
-	loweredChallenge := strings.ToLower(challenge)
-	raw := strings.TrimPrefix(loweredChallenge, "bearer")
+	scheme, raw, ok := strings.Cut(strings.TrimSpace(challenge), " ")
+	if !ok || !strings.EqualFold(scheme, "bearer") {
+		return nil, fmt.Errorf("unsupported auth challenge")
+	}
 
 	pairs := strings.Split(raw, ",")
 	values := make(map[string]string, len(pairs))
@@ -122,7 +137,7 @@ func GetAuthURL(challenge string, imageRef ref.Named) (*url.URL, error) {
 	for _, pair := range pairs {
 		trimmed := strings.Trim(pair, " ")
 		if key, val, ok := strings.Cut(trimmed, "="); ok {
-			values[key] = strings.Trim(val, `"`)
+			values[strings.ToLower(strings.TrimSpace(key))] = strings.Trim(strings.TrimSpace(val), `"`)
 		}
 	}
 	logrus.WithFields(logrus.Fields{
@@ -134,15 +149,21 @@ func GetAuthURL(challenge string, imageRef ref.Named) (*url.URL, error) {
 		return nil, fmt.Errorf("challenge header did not include all values needed to construct an auth url")
 	}
 
-	authURL, _ := url.Parse(values["realm"])
+	authURL, err := url.Parse(values["realm"])
+	if err != nil {
+		return nil, fmt.Errorf("invalid auth realm: %w", err)
+	}
+	if authURL.Scheme != "https" || authURL.Hostname() == "" || authURL.User != nil || authURL.Fragment != "" {
+		return nil, fmt.Errorf("auth realm must be an absolute HTTPS URL without user info or fragment")
+	}
 	q := authURL.Query()
-	q.Add("service", values["service"])
+	q.Set("service", values["service"])
 
 	scopeImage := ref.Path(imageRef)
 
 	scope := fmt.Sprintf("repository:%s:pull", scopeImage)
 	logrus.WithFields(logrus.Fields{"scope": scope, "image": imageRef.Name()}).Debug("Setting scope for auth token")
-	q.Add("scope", scope)
+	q.Set("scope", scope)
 
 	authURL.RawQuery = q.Encode()
 	return authURL, nil

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 
 	"github.com/containrrr/watchtower/pkg/registry/helpers"
 	cliconfig "github.com/docker/cli/cli/config"
@@ -15,14 +16,23 @@ import (
 )
 
 // EncodedAuth returns an encoded auth config for the given registry
-// loaded from environment variables or docker config
-// as available in that order
+// loaded from registry-scoped environment variables or docker config,
+// as available in that order. REPO_HOST defaults to Docker Hub.
 func EncodedAuth(ref string) (string, error) {
-	auth, err := EncodedEnvAuth()
+	server, err := helpers.GetRegistryAddress(ref)
 	if err != nil {
-		auth, err = EncodedConfigAuth(ref)
+		return "", err
 	}
-	return auth, err
+	envHost := os.Getenv("REPO_HOST")
+	if envHost == "" || envHost == helpers.DefaultRegistryDomain || envHost == helpers.LegacyDefaultRegistryDomain {
+		envHost = helpers.DefaultRegistryHost
+	}
+	if strings.EqualFold(server, envHost) {
+		if auth, err := EncodedEnvAuth(); err == nil {
+			return auth, nil
+		}
+	}
+	return EncodedConfigAuth(ref)
 }
 
 // EncodedEnvAuth returns an encoded auth config for the given registry
@@ -36,7 +46,7 @@ func EncodedEnvAuth() (string, error) {
 			Username: username,
 			Password: password,
 		}
-    
+
 		log.Debugf("Loaded auth credentials for registry user %s from environment", auth.Username)
 		// CREDENTIAL: Uncomment to log REPO_PASS environment variable
 		// log.Tracef("Using auth password %s", auth.Password)

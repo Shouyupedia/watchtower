@@ -27,7 +27,7 @@ func Update(client container.Client, params types.UpdateParams) (types.Report, e
 
 	containers, err := client.ListContainers(params.Filter)
 	if err != nil {
-		return nil, err
+		return progress.Report(), err
 	}
 
 	staleCheckFailed := 0
@@ -64,10 +64,14 @@ func Update(client container.Client, params types.UpdateParams) (types.Report, e
 		}
 	}
 
-	containers, err = sorter.SortByDependencies(containers)
+	sortedContainers, err := sorter.SortByDependencies(containers)
 	if err != nil {
-		return nil, err
+		for _, c := range containers {
+			progress.AddSkipped(c, err)
+		}
+		return progress.Report(), err
 	}
+	containers = sortedContainers
 
 	UpdateImplicitRestart(containers)
 

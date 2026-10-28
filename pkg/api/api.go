@@ -1,8 +1,11 @@
 package api
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -25,10 +28,11 @@ func New(token string) *API {
 
 // RequireToken is wrapper around http.HandleFunc that checks token validity
 func (api *API) RequireToken(fn http.HandlerFunc) http.HandlerFunc {
+	want := sha256.Sum256([]byte(fmt.Sprintf("Bearer %s", api.Token)))
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
-		want := fmt.Sprintf("Bearer %s", api.Token)
-		if auth != want {
+		got := sha256.Sum256([]byte(auth))
+		if api.Token == "" || subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -72,5 +76,12 @@ func (api *API) Start(block bool) error {
 }
 
 func runHTTPServer() {
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	server := &http.Server{
+		Addr:              ":8080",
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    64 * 1024,
+	}
+	log.Fatal(server.ListenAndServe())
 }
