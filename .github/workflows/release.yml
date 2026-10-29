@@ -76,16 +76,3 @@ jobs:
           args: --debug
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  renew-docs:
-    name: Refresh pkg.go.dev
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-    - name: Pull new module version
-      uses: andrewslotin/go-proxy-pull-action@50fea06a976087614babb9508e5c528b464f4645 #master@2022-10-14
-
-  
-  
-
-  
