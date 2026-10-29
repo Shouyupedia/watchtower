@@ -166,13 +166,14 @@ Environment Variable: DOCKER_HOST
 ```
 
 ## Docker API version
-The API version to use by the Docker client for connecting to the Docker daemon. The minimum supported version is 1.24.
+The API version to use by the Docker client for connecting to the Docker daemon. When unset, the version is
+negotiated with the daemon, so it only needs to be set to force a specific version.
 
 ```text
             Argument: --api-version, -a
 Environment Variable: DOCKER_API_VERSION
                 Type: String
-             Default: "1.24"
+             Default: (negotiated with the daemon)
 ```
 
 ## Include restarting
