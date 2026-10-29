@@ -1,6 +1,6 @@
 services:
   watchtower:
-    image: ghcr.io/Shouyupedia/watchtower:
+    image: ghcr.io/shouyupedia/watchtower:latest
     container_name: watchtower
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
