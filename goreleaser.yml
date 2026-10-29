@@ -9,6 +9,10 @@ build:
     - 386
     - arm
     - arm64
+  ignore:
+    # the 32-bit windows/arm port was removed in Go 1.26
+    - goos: windows
+      goarch: arm
   ldflags:
     - -s -w -X github.com/containrrr/watchtower/internal/meta.Version={{.Version}}
 archives:

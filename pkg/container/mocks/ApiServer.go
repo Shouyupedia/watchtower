@@ -12,8 +12,9 @@ import (
 
 	t "github.com/containrrr/watchtower/pkg/types"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/filters"
+	dockerContainer "github.com/moby/moby/api/types/container"
+	dockerImage "github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/client"
 	O "github.com/onsi/gomega"
 	"github.com/onsi/gomega/ghttp"
 )
@@ -62,12 +63,8 @@ func GetContainerHandlers(containerRefs ...*ContainerRef) []http.HandlerFunc {
 	return handlers
 }
 
-func createFilterArgs(statuses []string) filters.Args {
-	args := filters.NewArgs()
-	for _, status := range statuses {
-		args.Add("status", status)
-	}
-	return args
+func createFilterArgs(statuses []string) client.Filters {
+	return make(client.Filters).Add("status", statuses...)
 }
 
 var defaultImage = imageRef{
@@ -165,7 +162,7 @@ func getContainerHandler(containerId string, responseHandler http.HandlerFunc) h
 }
 
 // GetContainerHandler mocks the GET containers/{id}/json endpoint
-func GetContainerHandler(containerID string, containerInfo *types.ContainerJSON) http.HandlerFunc {
+func GetContainerHandler(containerID string, containerInfo *dockerContainer.InspectResponse) http.HandlerFunc {
 	responseHandler := containerNotFoundResponse(containerID)
 	if containerInfo != nil {
 		responseHandler = ghttp.RespondWithJSONEncoded(http.StatusOK, containerInfo)
@@ -174,14 +171,14 @@ func GetContainerHandler(containerID string, containerInfo *types.ContainerJSON)
 }
 
 // GetImageHandler mocks the GET images/{id}/json endpoint
-func GetImageHandler(imageInfo *types.ImageInspect) http.HandlerFunc {
+func GetImageHandler(imageInfo *dockerImage.InspectResponse) http.HandlerFunc {
 	return getImageHandler(t.ImageID(imageInfo.ID), ghttp.RespondWithJSONEncoded(http.StatusOK, imageInfo))
 }
 
 // ListContainersHandler mocks the GET containers/json endpoint, filtering the returned containers based on statuses
 func ListContainersHandler(statuses ...string) http.HandlerFunc {
 	filterArgs := createFilterArgs(statuses)
-	bytes, err := filterArgs.MarshalJSON()
+	bytes, err := json.Marshal(filterArgs)
 	O.ExpectWithOffset(1, err).ShouldNot(O.HaveOccurred())
 	query := url.Values{
 		"filters": []string{string(bytes)},
@@ -192,15 +189,15 @@ func ListContainersHandler(statuses ...string) http.HandlerFunc {
 	)
 }
 
-func respondWithFilteredContainers(filters filters.Args) http.HandlerFunc {
+func respondWithFilteredContainers(filters client.Filters) http.HandlerFunc {
 	containersJSON, err := getMockJSONFile("./mocks/data/containers.json")
 	O.ExpectWithOffset(2, err).ShouldNot(O.HaveOccurred())
-	var filteredContainers []types.Container
-	var containers []types.Container
+	var filteredContainers []dockerContainer.Summary
+	var containers []dockerContainer.Summary
 	O.ExpectWithOffset(2, json.Unmarshal(containersJSON, &containers)).To(O.Succeed())
 	for _, v := range containers {
-		for _, key := range filters.Get("status") {
-			if v.State == key {
+		for key := range filters["status"] {
+			if string(v.State) == key {
 				filteredContainers = append(filteredContainers, v)
 			}
 		}
@@ -262,12 +259,12 @@ func RemoveImageHandler(imagesWithParents map[string][]string) http.HandlerFunc 
 			image := parts[len(parts)-1]
 
 			if parents, found := imagesWithParents[image]; found {
-				items := []types.ImageDeleteResponseItem{
+				items := []dockerImage.DeleteResponse{
 					{Untagged: image},
 					{Deleted: image},
 				}
 				for _, parent := range parents {
-					items = append(items, types.ImageDeleteResponseItem{Deleted: parent})
+					items = append(items, dockerImage.DeleteResponse{Deleted: parent})
 				}
 				ghttp.RespondWithJSONEncoded(http.StatusOK, items)(w, r)
 			} else {
