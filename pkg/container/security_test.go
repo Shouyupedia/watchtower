@@ -7,8 +7,7 @@ import (
 	"time"
 
 	wt "github.com/containrrr/watchtower/pkg/types"
-	"github.com/docker/docker/api/types"
-	sdkClient "github.com/docker/docker/client"
+	sdkClient "github.com/moby/moby/client"
 )
 
 func TestCreateConfigPreservesRunningUser(t *testing.T) {
@@ -23,29 +22,29 @@ func TestCreateConfigPreservesRunningUser(t *testing.T) {
 }
 
 type stalledExecClient struct {
-	sdkClient.CommonAPIClient
+	sdkClient.APIClient
 	deadline time.Time
 	attached net.Conn
 	peer     net.Conn
 }
 
-func (c *stalledExecClient) ContainerExecCreate(ctx context.Context, _ string, _ types.ExecConfig) (types.IDResponse, error) {
+func (c *stalledExecClient) ExecCreate(ctx context.Context, _ string, _ sdkClient.ExecCreateOptions) (sdkClient.ExecCreateResult, error) {
 	c.deadline, _ = ctx.Deadline()
-	return types.IDResponse{ID: "dummy-exec"}, nil
+	return sdkClient.ExecCreateResult{ID: "dummy-exec"}, nil
 }
 
-func (c *stalledExecClient) ContainerExecAttach(ctx context.Context, _ string, _ types.ExecStartCheck) (types.HijackedResponse, error) {
+func (c *stalledExecClient) ExecAttach(ctx context.Context, _ string, _ sdkClient.ExecAttachOptions) (sdkClient.ExecAttachResult, error) {
 	c.deadline, _ = ctx.Deadline()
 	c.attached, c.peer = net.Pipe()
-	return types.NewHijackedResponse(c.attached, ""), nil
+	return sdkClient.ExecAttachResult{HijackedResponse: sdkClient.NewHijackedResponse(c.attached, "")}, nil
 }
 
-func (c *stalledExecClient) ContainerExecStart(context.Context, string, types.ExecStartCheck) error {
-	return nil
+func (c *stalledExecClient) ExecStart(context.Context, string, sdkClient.ExecStartOptions) (sdkClient.ExecStartResult, error) {
+	return sdkClient.ExecStartResult{}, nil
 }
 
-func (c *stalledExecClient) ContainerExecInspect(ctx context.Context, _ string) (types.ContainerExecInspect, error) {
-	return types.ContainerExecInspect{Running: true}, ctx.Err()
+func (c *stalledExecClient) ExecInspect(ctx context.Context, _ string, _ sdkClient.ExecInspectOptions) (sdkClient.ExecInspectResult, error) {
+	return sdkClient.ExecInspectResult{Running: true}, ctx.Err()
 }
 
 func TestExecDeadlineCoversAttachedOutput(t *testing.T) {

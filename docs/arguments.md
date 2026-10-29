@@ -167,7 +167,8 @@ Environment Variable: DOCKER_HOST
 
 ## Docker API version
 The API version to use by the Docker client for connecting to the Docker daemon. When unset, the version is
-negotiated with the daemon, so it only needs to be set to force a specific version.
+negotiated with the daemon, so it only needs to be set to force a specific version. API versions 1.40 to 1.56
+are supported, which means Docker Engine 19.03 or newer, including Docker Engine 29.
 
 ```text
             Argument: --api-version, -a
