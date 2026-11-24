@@ -1,3 +1,3 @@
-### Containrrr Community Code of Conduct
+### Code of Conduct
 
-Please refer to out [Containrrr Community Code of Conduct](https://github.com/containrrr/.github/blob/master/CODE_OF_CONDUCT.md)
+This project follows the [Contributor Covenant Code of Conduct, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
