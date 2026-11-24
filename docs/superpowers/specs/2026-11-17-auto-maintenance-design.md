@@ -107,8 +107,7 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
 | `scheduled-release.yml`（新） | 每周二 03:23 UTC；`workflow_dispatch` | 判定任务（只读）：找最高的 `vX.Y.Z` tag，如果 main 上没有新提交就结束；否则计算下一个补丁版本号。打 tag 任务（`contents: write`）：创建带注释的 tag 并推送，这个推送不会触发 tag 工作流。然后调用 `release.yml`。 |
 | `docker.yml`（改为可复用） | `workflow_call`（输入 `ref`、`tags`、`push`）；`workflow_dispatch`（重新发布已有 tag） | 唯一的镜像构建/推送实现，被 ci、push-main、release 复用。 |
 | `codeql-analysis.yml`（改） | 不变 | 钉 SHA，顶层只读，删除已过时的 `git checkout HEAD^2` 步骤。 |
-| `publish-docs.yml`（改） | 仅 `workflow_dispatch` | 原 `workflow_run` 带 `branches: [main]` 过滤，而发布在 tag 上运行，所以从未触发。改为手动触发，钉 SHA。 |
-| 删除 | — | `greetings.yml`、`dependabot-approve.yml`、`release-dev.yaml` |
+| 删除 | — | `greetings.yml`、`dependabot-approve.yml`、`release-dev.yaml`、`publish-docs.yml`（不发布 GitHub Pages） |
 
 **发布语义**
 
@@ -137,7 +136,7 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
 | `SECURITY.md` | 上游维护者的邮箱改为本仓库的 GitHub 私密漏洞报告入口 |
 | `code_of_conduct.md` | 不再引用 Containrrr 社区准则，改为引用 Contributor Covenant 2.1 |
 | `CONTRIBUTING.md` | 示例镜像名改为本仓库；更正 `Dockerfile.self-contained` 的说明（它现在构建本地源码） |
-| `mkdocs.yml` | `site_url` 改为 `https://shouyupedia.github.io/watchtower/`，`repo_url`、`user` 指向本仓库；`exclude_docs` 排除 `superpowers/`，避免设计文档被发布到站点 |
+| `mkdocs.yml` | 移除 `site_url`（不发布 GitHub Pages），`repo_url`、`user` 指向本仓库；`exclude_docs` 排除 `superpowers/` |
 | `docs/*.md` | 用户可见的镜像名 `containrrr/watchtower` 改为 `ghcr.io/shouyupedia/watchtower`；指向 `containrrr.dev/watchtower` 和 `containrrr.github.io/watchtower` 的站内链接改为相对链接；`index.md` 里上游的 CI/Codecov/GoDoc/Docker Hub 徽章删除或改为本仓库。指向 shoutrrr（真实依赖）的链接保留 |
 | `scripts/dependency-test.sh` | 镜像名改为本仓库 |
 | 保留 | Go 模块路径、`com.centurylinklabs.watchtower*` 标签、`containrrr/shoutrrr` 依赖、测试夹具、LICENSE、README 致谢 |

@@ -1,24 +1,14 @@
-name: Publish Docker image
+name: Publish Docker image (tag)
 
+# Transitional tag-triggered publisher retained until PR 5 integrates
+# docker-publish.yml into release.yml. PR builds, main pushes, and manual
+# dispatches are handled by ci.yml / push-main.yml / docker-publish.yml.
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
-  # build only, to check the image still builds
-  pull_request:
-    branches:
-      - main
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Existing release tag to (re)publish, for example v2.0.0'
-        required: true
-      latest:
-        description: 'Also tag the image as latest'
-        type: boolean
-        default: true
+
+permissions: {}
 
 jobs:
   publish:
@@ -29,55 +19,36 @@ jobs:
       packages: write
     steps:
       - name: Checkout source
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
-      # Always build with the Dockerfile from the workflow's own commit, so that
-      # older tags can be republished even if their Dockerfile differs.
-      - name: Checkout Dockerfile
-        uses: actions/checkout@v5
-        with:
-          path: .ci
-          sparse-checkout: dockerfiles/Dockerfile
-          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Compute image tags
         id: meta
-        env:
-          INPUT_TAG: ${{ inputs.tag }}
-          INPUT_LATEST: ${{ inputs.latest }}
+        shell: bash
         run: |
+          set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            tags="$image:${INPUT_TAG#v}"
-            if [ "$INPUT_LATEST" = "true" ]; then tags="$tags,$image:latest"; fi
-          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            tags="$image:${GITHUB_REF_NAME#v},$image:latest"
-          else
-            tags="$image:latest-dev"
-          fi
-          echo "tags=$tags" >> "$GITHUB_OUTPUT"
-          echo "version=$(git describe --tags)" >> "$GITHUB_OUTPUT"
-          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+          tag="${GITHUB_REF_NAME#v}"
+          {
+            echo "tags=${image}:${tag},${image}:latest"
+            echo "version=$(git describe --tags --always)"
+            echo "revision=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Login to GHCR
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build and push
-        uses: docker/build-push-action@v7
+        uses: ./.github/actions/docker-build
         with:
-          context: .
-          file: .ci/dockerfiles/Dockerfile
-          platforms: linux/amd64,linux/386,linux/arm/v6,linux/arm64
-          build-args: WATCHTOWER_VERSION=${{ steps.meta.outputs.version }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
-            org.opencontainers.image.revision=${{ steps.meta.outputs.revision }}
+          push: 'true'
           tags: ${{ steps.meta.outputs.tags }}
-          push: ${{ github.event_name != 'pull_request' }}
+          version: ${{ steps.meta.outputs.version }}
+          revision: ${{ steps.meta.outputs.revision }}
+          disable_cache: 'true'
