@@ -11,7 +11,8 @@
 #     metadata; any other file or directory fails the contract
 #   * every archive contains watchtower (watchtower.exe on Windows) and
 #     LICENSE.md
-#   * the host-runnable binary carries the injected version string
+#   * every archived binary matches its corresponding build output byte-for-byte
+#     and carries the injected version string
 #
 # The version check reads the binary with `strings` instead of executing it:
 # watchtower has no --version flag (`-v` is --tlsverify) and prints its version
@@ -144,7 +145,21 @@ done
   || { cat "$tmp/sha256.out" >&2; fail "sha256sum -c $checksums failed"; }
 echo "check-release-contract: checksums verified ($line_count entries)"
 
-# 5. Every archive contains the binary and LICENSE.md.
+# 5. Every archive contains the binary and LICENSE.md, its packaged binary
+#    matches the corresponding build output byte-for-byte, and it carries the
+#    injected version string.
+command -v cmp > /dev/null 2>&1 || fail "the 'cmp' tool is required for archive binary verification"
+command -v strings > /dev/null 2>&1 || fail "the 'strings' tool is required for the version check"
+
+declare -A archive_target_dir=(
+  [watchtower_linux_386.tar.gz]=watchtower_linux_386_sse2
+  [watchtower_linux_amd64.tar.gz]=watchtower_linux_amd64_v1
+  [watchtower_linux_arm64v8.tar.gz]=watchtower_linux_arm64_v8.0
+  [watchtower_linux_armhf.tar.gz]=watchtower_linux_arm_6
+  [watchtower_windows_386.zip]=watchtower_windows_386_sse2
+  [watchtower_windows_amd64.zip]=watchtower_windows_amd64_v1
+)
+
 for name in "${archives[@]}"; do
   case "$name" in
   *.zip) unzip -Z1 "$dist/$name" > "$tmp/list.txt" ;;
@@ -161,26 +176,25 @@ for name in "${archives[@]}"; do
     cat "$tmp/list.diff" >&2
     fail "$name does not contain exactly LICENSE.md and $expected_binary"
   fi
+
+  extract_dir="$tmp/extract/$name"
+  mkdir -p "$extract_dir"
+  case "$name" in
+  *.zip) unzip -qq -o "$dist/$name" "$expected_binary" -d "$extract_dir" ;;
+  *.tar.gz) tar -xzf "$dist/$name" -C "$extract_dir" "$expected_binary" ;;
+  esac
+
+  packaged_bin="$extract_dir/$expected_binary"
+  built_bin="$dist/${archive_target_dir[$name]}/$expected_binary"
+  [ -f "$packaged_bin" ] || fail "failed to extract $expected_binary from $name"
+  [ -f "$built_bin" ] || fail "built binary missing: $built_bin"
+  cmp -s "$packaged_bin" "$built_bin" \
+    || fail "$name:$expected_binary differs from built binary $built_bin"
+
+  strings "$packaged_bin" > "$tmp/packaged-binary.strings" 2> /dev/null
+  grep -Fxq -- "$version" "$tmp/packaged-binary.strings" \
+    || fail "injected version $version not found in $name:$expected_binary (ldflags injection missing?)"
 done
-echo "check-release-contract: archive contents verified"
-
-# 6. The host-runnable binary carries the injected version.
-if [ "$(uname -s)" = "Linux" ]; then
-  host_prefix=watchtower_linux_amd64
-  host_bin_name=watchtower
-else
-  host_prefix=watchtower_windows_amd64
-  host_bin_name=watchtower.exe
-fi
-host_detail="$(find "$dist" -mindepth 1 -maxdepth 1 -type d -name "${host_prefix}*" -print -quit)"
-[ -n "$host_detail" ] || fail "no host-runnable snapshot directory (${host_prefix}*) in $dist"
-host_bin="$host_detail/$host_bin_name"
-[ -f "$host_bin" ] || fail "host binary missing: $host_bin"
-
-command -v strings > /dev/null 2>&1 || fail "the 'strings' tool is required for the version check"
-strings "$host_bin" > "$tmp/host-binary.strings" 2> /dev/null
-grep -Fxq -- "$version" "$tmp/host-binary.strings" \
-  || fail "injected version $version not found in $host_bin (ldflags injection missing?)"
-echo "check-release-contract: $host_bin carries injected version $version"
+echo "check-release-contract: archive contents, binary byte identity, and injected version $version verified for all ${#archives[@]} archives"
 
 echo "check-release-contract: ok"

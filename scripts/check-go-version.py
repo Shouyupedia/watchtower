@@ -8,9 +8,10 @@ Checked invariants:
   whose <version> matches ``.go-version`` exactly and whose digest is a full
   sha256.
 * The ``go`` directive in ``go.mod`` and ``tools/go.mod`` is in the same
-  MAJOR.MINOR series as ``.go-version``. The directive is the *minimum*
-  language version and is allowed to lag the patch level; a different
-  minor/major series is drift and fails.
+  MAJOR.MINOR series as ``.go-version`` and its minimum patch level is not
+  newer than ``.go-version``. The directive is the *minimum* language version
+  and is allowed to lag the patch level; a different minor/major series or a
+  minimum patch higher than ``.go-version`` is drift and fails.
 
 Usage:
     python scripts/check-go-version.py [--root DIR]
@@ -69,14 +70,18 @@ def parse_go_version(text):
 
 
 def parse_go_directive(path, text):
-    """Return (major, minor) from the first go directive in a go.mod file."""
+    """Return (major, minor, patch) from the first go directive in a go.mod file.
+
+    An omitted patch component (e.g. ``go 1.26``) is treated as 0.
+    """
     for raw in text.splitlines():
         line = raw.strip()
         if line.startswith("go ") or line.startswith("go\t"):
             match = GO_DIRECTIVE_RE.match(line)
             if not match:
                 raise CheckError(f"{path}: malformed go directive {line!r}")
-            return int(match.group(1)), int(match.group(2))
+            mod_patch = int(match.group(3)) if match.group(3) is not None else 0
+            return int(match.group(1)), int(match.group(2)), mod_patch
     raise CheckError(f"{path}: no go directive found")
 
 
@@ -125,7 +130,7 @@ def collect(root):
 
     for rel in GO_MODS:
         try:
-            mod_major, mod_minor = parse_go_directive(rel, _read(root / rel))
+            mod_major, mod_minor, mod_patch = parse_go_directive(rel, _read(root / rel))
         except CheckError as exc:
             problems.append(str(exc))
             continue
@@ -133,6 +138,11 @@ def collect(root):
             problems.append(
                 f"{rel}: go directive {mod_major}.{mod_minor} is not in the "
                 f"same series as .go-version {major}.{minor}.{patch}"
+            )
+        elif mod_patch > patch:
+            problems.append(
+                f"{rel}: go directive {mod_major}.{mod_minor}.{mod_patch} "
+                f"requires a newer patch than .go-version {major}.{minor}.{patch}"
             )
 
     return problems

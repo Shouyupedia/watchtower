@@ -1,0 +1,170 @@
+name: Publish Docker image (trusted)
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact Git commit SHA to build and publish
+        type: string
+        required: true
+      tag:
+        description: Release version tag (not enabled until PR 5; must be empty in PR 3)
+        type: string
+        required: false
+        default: ''
+      push_latest:
+        description: Also advance :latest tag (not enabled until PR 5; must be false in PR 3)
+        type: boolean
+        required: false
+        default: false
+      disable_cache:
+        description: Disable Docker build cache
+        type: boolean
+        required: false
+        default: true
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Build, push by digest, and attest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      revision: ${{ steps.meta.outputs.revision }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Reject version tag and latest publishing until PR 5
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PUSH_LATEST: ${{ inputs.push_latest }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then
+            echo "error: docker-publish.yml 'tag' input is not enabled until PR 5 (got '$INPUT_TAG')" >&2
+            exit 1
+          fi
+          if [ "$INPUT_PUSH_LATEST" = "true" ]; then
+            echo "error: docker-publish.yml 'push_latest' is not enabled until PR 5" >&2
+            exit 1
+          fi
+
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Compute image metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          version="$(git describe --tags --always)"
+          revision="$(git rev-parse HEAD)"
+          {
+            echo "image=${image}"
+            echo "version=${version}"
+            echo "revision=${revision}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image by digest
+        id: build
+        uses: ./.github/actions/docker-build
+        with:
+          push_by_digest: 'true'
+          image: ${{ steps.meta.outputs.image }}
+          version: ${{ steps.meta.outputs.version }}
+          revision: ${{ steps.meta.outputs.revision }}
+          disable_cache: ${{ inputs.disable_cache }}
+
+      - name: Verify pushed digest
+        shell: bash
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "error: unexpected image digest '${DIGEST}'" >&2
+            exit 1
+          fi
+
+      - name: Attest image build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.meta.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  promote-latest-dev:
+    name: Promote latest-dev tag
+    needs: publish
+    runs-on: ubuntu-latest
+    concurrency:
+      group: publish-latest-dev
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check that candidate SHA is still main tip
+        id: check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_SHA: ${{ needs.publish.outputs.revision }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "error: unexpected candidate SHA '${CANDIDATE_SHA}'" >&2
+            exit 1
+          fi
+          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ ! "$main_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "error: failed to resolve remote main SHA (got '${main_sha}')" >&2
+            exit 1
+          fi
+          if [ "$main_sha" != "$CANDIDATE_SHA" ]; then
+            echo "Skipping :latest-dev promotion: remote main is at ${main_sha}, candidate is ${CANDIDATE_SHA}"
+            echo "should_promote=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Remote main matches candidate ${CANDIDATE_SHA}; promoting :latest-dev"
+            echo "should_promote=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Login to GHCR
+        if: steps.check.outputs.should_promote == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote attested digest to latest-dev
+        if: steps.check.outputs.should_promote == 'true'
+        shell: bash
+        env:
+          IMAGE: ${{ needs.publish.outputs.image }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "error: unexpected image digest '${DIGEST}'" >&2
+            exit 1
+          fi
+          docker buildx imagetools create --tag "${IMAGE}:latest-dev" "${IMAGE}@${DIGEST}"
