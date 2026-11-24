@@ -13,3 +13,5 @@ docs/assets/wasm_exec.js
 docs/assets/*.wasm
 /oryxBuildBinary
 /.tools/
+__pycache__/
+*.pyc

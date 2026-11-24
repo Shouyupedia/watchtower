@@ -62,9 +62,6 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: 1.26.x
+          go-version-file: .go-version
       - name: Build
-        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de #v7.3.0
-        with:
-          version: v0.155.0
-          args: --snapshot --skip-publish --debug
+        run: go tool -modfile=tools/go.mod goreleaser release --snapshot --clean
