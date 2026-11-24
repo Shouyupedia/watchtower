@@ -1,7 +1,9 @@
 site_name: Watchtower
-site_url: https://containrrr.dev/watchtower/
-repo_url: https://github.com/containrrr/watchtower/
+site_url: https://shouyupedia.github.io/watchtower/
+repo_url: https://github.com/shouyupedia/watchtower/
 edit_uri: edit/main/docs/
+exclude_docs: |
+  superpowers/
 theme:
   name: 'material'
   palette:
@@ -29,7 +31,7 @@ markdown_extensions:
     - pymdownx.magiclink:
         repo_url_shortener: True
         provider: github
-        user: containrrr
+        user: shouyupedia
         repo: watchtower
     - pymdownx.saneheaders
     - pymdownx.tabbed:

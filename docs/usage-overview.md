@@ -1,4 +1,4 @@
-Watchtower is itself packaged as a Docker container so installation is as simple as pulling the `containrrr/watchtower` image. If you are using ARM based architecture, pull the appropriate `containrrr/watchtower:armhf-<tag>` image from the [containrrr Docker Hub](https://hub.docker.com/r/containrrr/watchtower/tags/).
+Watchtower is itself packaged as a Docker container so installation is as simple as pulling the `ghcr.io/shouyupedia/watchtower` image from the GitHub Container Registry (GHCR). The published tags are multi-arch manifests covering `linux/amd64`, `linux/386`, `linux/arm/v6` and `linux/arm64`, so Docker automatically selects the image matching your host's architecture.
 
 Since the watchtower code needs to interact with the Docker API in order to monitor the running containers, you need to mount _/var/run/docker.sock_ into the container with the `-v` flag when you run it.
 
@@ -8,7 +8,7 @@ Run the `watchtower` container with the following command:
 docker run -d \
   --name watchtower \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  containrrr/watchtower
+  ghcr.io/shouyupedia/watchtower
 ```
 
 If pulling images from private Docker registries, supply registry authentication credentials with the environment variables `REPO_USER` and `REPO_PASS`.
@@ -23,7 +23,7 @@ docker run -d \
   -e REPO_USER=username \
   -e REPO_PASS=password \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  containrrr/watchtower container_to_watch --debug
+  ghcr.io/shouyupedia/watchtower container_to_watch --debug
 ```
 
 Also check out [this Stack Overflow answer](https://stackoverflow.com/a/30494145/7872793) for more options on how to pass environment variables.
@@ -35,7 +35,7 @@ docker run -d \
   --name watchtower \
   -v $HOME/.docker/config.json:/config.json \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  containrrr/watchtower container_to_watch --debug
+  ghcr.io/shouyupedia/watchtower container_to_watch --debug
 ```
 
 !!! note "Changes to config.json while running"
@@ -61,7 +61,7 @@ services:
       - "443:3443"
       - "80:3080"
   watchtower:
-    image: containrrr/watchtower
+    image: ghcr.io/shouyupedia/watchtower
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /root/.docker/config.json:/config.json
