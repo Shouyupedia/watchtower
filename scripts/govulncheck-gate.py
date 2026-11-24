@@ -73,46 +73,58 @@ def _parse_date(value):
         ) from exc
 
 
-def _finding_level(finding):
+def _validate_frame(osv, frame):
+    """Validate a trace frame and return its severity level."""
+    if not isinstance(frame, dict):
+        raise GateError(f"finding {osv} has a non-object trace frame")
+    for key in ("function", "package", "module"):
+        if key in frame and frame[key] is not None and not isinstance(frame[key], str):
+            raise GateError(
+                f"finding {osv} has a non-string {key!r} field in trace frame"
+            )
+    if (frame.get("function") or "").strip():
+        return "called"
+    if (frame.get("package") or "").strip():
+        return "imported"
+    if (frame.get("module") or "").strip():
+        return "required"
+    raise GateError(
+        f"finding {osv} has a trace frame without a non-empty "
+        "function, package, or module"
+    )
+
+
+def _finding_level(osv, trace):
     """Classify a govulncheck finding as 'called', 'imported' or 'required'.
 
     A finding's ``trace`` is the list of frames from the vulnerable symbol down
-    to the module. A frame is a called symbol when it has a ``function`` key, an
-    imported package when it has ``package``, and a required module when it has
-    ``module``. The most severe level present in the trace wins.
+    to the module. Every frame must identify a function, package, or module;
+    structurally empty or malformed frames are rejected rather than downgraded.
+    The most severe level present in the trace wins.
     """
-    levels = set()
-    trace = finding.get("trace")
-    if not isinstance(trace, list):
-        return "required"
-    for frame in trace:
-        if not isinstance(frame, dict):
-            continue
-        if frame.get("function"):
-            levels.add("called")
-        elif frame.get("package"):
-            levels.add("imported")
-        elif frame.get("module"):
-            levels.add("required")
+    levels = {_validate_frame(osv, frame) for frame in trace}
     for level in ("called", "imported", "required"):
         if level in levels:
             return level
-    return "required"
+    raise GateError(f"finding {osv} trace produced no valid severity level")
 
 
 def parse_stream(text):
     """Return {osv_id: level} for every finding in a govulncheck JSON stream.
 
     The stream is a sequence of JSON values separated by whitespace (not a
-    single JSON array). The report must start with a ``config`` object that
-    proves it is a symbol-level source scan, and every ``finding`` must carry a
-    well-formed OSV id and trace. Blank input, malformed JSON, a missing config,
-    or a structurally broken finding are errors: a truncated or foreign report
-    must never look like a clean one.
+    single JSON array). The report must include a ``config`` object proving a
+    symbol-level source scan, an ``SBOM`` object with at least one scanned
+    package root, and well-formed OSV ids and traces on every ``finding``.
+    The govulncheck JSON stream protocol has no explicit end-of-stream marker,
+    so these checks catch config-only, non-source, unscanned, and structurally
+    invalid reports without claiming to detect every truncation after SBOM
+    emission.
     """
     decoder = json.JSONDecoder()
     findings = {}
     saw_config = False
+    saw_sbom = False
     index = 0
     text = text.lstrip("\ufeff")
     length = len(text)
@@ -139,7 +151,27 @@ def parse_stream(text):
                     f"{config.get('scan_level')!r}); called-vulnerability "
                     "semantics require -scan symbol (the default)"
                 )
+            if config.get("scan_mode") != "source":
+                raise GateError(
+                    "report is not a source scan (scan_mode="
+                    f"{config.get('scan_mode')!r}); expected 'source'"
+                )
             saw_config = True
+            continue
+        if "SBOM" in event:
+            sbom = event["SBOM"]
+            if not isinstance(sbom, dict):
+                raise GateError("report SBOM is not a JSON object")
+            roots = sbom.get("roots")
+            if (
+                not isinstance(roots, list)
+                or not roots
+                or not all(isinstance(root, str) and root.strip() for root in roots)
+            ):
+                raise GateError(
+                    "report SBOM must contain a non-empty 'roots' list of package strings"
+                )
+            saw_sbom = True
             continue
         if "finding" not in event:
             continue
@@ -152,9 +184,7 @@ def parse_stream(text):
         trace = finding.get("trace")
         if not isinstance(trace, list) or not trace:
             raise GateError(f"finding {osv} has no trace frames")
-        if not all(isinstance(frame, dict) for frame in trace):
-            raise GateError(f"finding {osv} has a non-object trace frame")
-        level = _finding_level(finding)
+        level = _finding_level(osv, trace)
         previous = findings.get(osv)
         if previous is not None:
             level = max(previous, level, key=SEVERITY.index)
@@ -162,6 +192,10 @@ def parse_stream(text):
     if not saw_config:
         raise GateError(
             "empty or truncated report: no govulncheck config object found"
+        )
+    if not saw_sbom:
+        raise GateError(
+            "incomplete report: no govulncheck SBOM object with package roots found"
         )
     return findings
 

@@ -27,8 +27,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
-      - name: Dependency Review
-        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          comment-summary-in-pr: never
+          python-version-file: .python-version
+      - name: Run fork-compatible dependency review
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if git rev-parse --verify --quiet HEAD^2 > /dev/null; then
+            base_ref="$(git rev-parse HEAD^1)"
+          else
+            base_ref="$BASE_SHA"
+          fi
+          python -I scripts/dependency-review.py --base "$base_ref" --head HEAD

@@ -117,13 +117,9 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version-file: .python-version
-      - name: Run govulncheck and evaluate gate
+      - name: Run govulncheck across release targets and evaluate gate
         shell: bash
-        run: |
-          set -euo pipefail
-          scanner_exit=0
-          go tool -modfile=tools/go.mod govulncheck -format json ./... > govulncheck.json || scanner_exit=$?
-          python -I scripts/govulncheck-gate.py --scanner-exit "$scanner_exit" govulncheck.json
+        run: bash scripts/run-govulncheck.sh
 
   script-tests:
     name: script-tests

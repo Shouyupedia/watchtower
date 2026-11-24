@@ -29,7 +29,14 @@ CONFIG_EVENT = {
     "config": {
         "scanner_name": "govulncheck",
         "scan_level": "symbol",
-        "version": "v1.1.0",
+        "scan_mode": "source",
+        "version": "v1.10.0",
+    }
+}
+SBOM_EVENT = {
+    "SBOM": {
+        "go_version": "go1.26.11",
+        "roots": ["example.com/app"],
     }
 }
 
@@ -48,10 +55,12 @@ def finding(osv="GO-2024-0001", *frames):
     return {"osv": osv, "trace": [dict(frame) for frame in frames]}
 
 
-def report(*findings, config=CONFIG_EVENT, extra=()):
+def report(*findings, config=CONFIG_EVENT, sbom=SBOM_EVENT, extra=()):
     events = []
     if config is not None:
         events.append(config)
+    if sbom is not None:
+        events.append(sbom)
     events.extend({"finding": item} for item in findings)
     events.extend(extra)
     return "\n".join(json.dumps(event) for event in events) + "\n"
@@ -123,8 +132,27 @@ class ParseStreamTests(unittest.TestCase):
         doc = report(finding("GO-2024-0004", frame))
         self.assertEqual(gate.parse_stream(doc), {"GO-2024-0004": "called"})
 
-    def test_frame_without_any_known_key_is_required(self):
-        doc = report(finding("GO-2024-0005", {}))
+    def test_frame_without_any_known_key_is_rejected(self):
+        for bad_frame in (
+            {},
+            {"version": "v1.0.0"},
+            {"function": "", "package": "   ", "module": None},
+            {"module": 123},
+            {"function": ["f"], "module": "example.com/app"},
+        ):
+            with self.subTest(frame=bad_frame):
+                doc = report(finding("GO-2024-0005", bad_frame))
+                with self.assertRaises(gate.GateError):
+                    gate.parse_stream(doc)
+
+    def test_invalid_frame_alongside_valid_frame_is_rejected(self):
+        doc = report(finding("GO-2024-0005", CALLED_FRAME, {}))
+        with self.assertRaises(gate.GateError):
+            gate.parse_stream(doc)
+
+    def test_null_higher_fields_with_valid_module_is_required(self):
+        frame = {"function": None, "package": None, "module": "example.com/app"}
+        doc = report(finding("GO-2024-0005", frame))
         self.assertEqual(gate.parse_stream(doc), {"GO-2024-0005": "required"})
 
     def test_severity_merge_imported_then_called(self):
@@ -155,8 +183,10 @@ class ParseStreamTests(unittest.TestCase):
         self.assertEqual(gate.parse_stream(doc), {"GO-2024-0010": "called"})
 
     def test_concatenated_json_values_without_separators(self):
-        doc = json.dumps(CONFIG_EVENT) + json.dumps(
-            {"finding": finding("GO-2024-0008", CALLED_FRAME)}
+        doc = (
+            json.dumps(CONFIG_EVENT)
+            + json.dumps(SBOM_EVENT)
+            + json.dumps({"finding": finding("GO-2024-0008", CALLED_FRAME)})
         )
         self.assertEqual(gate.parse_stream(doc), {"GO-2024-0008": "called"})
 
@@ -200,9 +230,39 @@ class ParseStreamTests(unittest.TestCase):
     def test_non_symbol_scan_levels_are_rejected(self):
         for level in ("package", "module", "", None, 1):
             with self.subTest(scan_level=level):
-                doc = report(config={"config": {"scan_level": level}})
+                doc = report(
+                    config={"config": {"scan_level": level, "scan_mode": "source"}}
+                )
                 with self.assertRaises(gate.GateError):
                     gate.parse_stream(doc)
+
+    def test_non_source_scan_modes_are_rejected(self):
+        for mode in ("binary", "extract", "", None, 1):
+            with self.subTest(scan_mode=mode):
+                doc = report(
+                    config={"config": {"scan_level": "symbol", "scan_mode": mode}}
+                )
+                with self.assertRaises(gate.GateError):
+                    gate.parse_stream(doc)
+
+    def test_config_only_report_without_sbom_is_rejected(self):
+        with self.assertRaises(gate.GateError):
+            gate.parse_stream(report(sbom=None))
+
+    def test_sbom_with_invalid_or_empty_roots_is_rejected(self):
+        for bad_sbom in (
+            {"SBOM": []},
+            {"SBOM": {}},
+            {"SBOM": {"roots": []}},
+            {"SBOM": {"roots": None}},
+            {"SBOM": {"roots": [""]}},
+            {"SBOM": {"roots": ["   "]}},
+            {"SBOM": {"roots": [123]}},
+            {"SBOM": {"roots": ["example.com/app", ""]}},
+        ):
+            with self.subTest(sbom=bad_sbom):
+                with self.assertRaises(gate.GateError):
+                    gate.parse_stream(report(sbom=bad_sbom))
 
     def test_top_level_array_is_rejected(self):
         with self.assertRaises(gate.GateError):

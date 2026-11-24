@@ -126,6 +126,17 @@ class CollectHappyPathTests(TempDirTest):
             [],
         )
 
+    def test_equal_patch_and_omitted_patch_in_go_directives_are_allowed(self):
+        self.assertEqual(
+            self.collect(
+                gomods={
+                    "go.mod": "module example.com/app\n\ngo 1.26\n",
+                    "tools/go.mod": "module example.com/tools\n\ngo 1.26.11\n",
+                }
+            ),
+            [],
+        )
+
     def test_collect_accepts_a_string_root(self):
         make_repo(self.tmp)
         self.assertEqual(cgv.collect(str(self.tmp)), [])
@@ -213,6 +224,24 @@ class CollectFailureTests(TempDirTest):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("tools/go.mod", problems[0])
 
+    def test_go_mod_newer_patch_than_pin_is_reported(self):
+        problems = self.collect(
+            gomods={"go.mod": "module example.com/app\n\ngo 1.26.12\n"}
+        )
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("go.mod", problems[0])
+        self.assertIn("1.26.12", problems[0])
+        self.assertIn("newer patch", problems[0])
+
+    def test_tools_go_mod_newer_patch_than_pin_is_reported(self):
+        problems = self.collect(
+            gomods={"tools/go.mod": "module example.com/tools\n\ngo 1.26.12\n"}
+        )
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("tools/go.mod", problems[0])
+        self.assertIn("1.26.12", problems[0])
+        self.assertIn("newer patch", problems[0])
+
     def test_major_version_drift_is_reported(self):
         problems = self.collect(
             gomods={"go.mod": "module example.com/app\n\ngo 2.0.0\n"}
@@ -290,23 +319,25 @@ class ParseGoVersionTests(unittest.TestCase):
 
 class ParseGoDirectiveTests(unittest.TestCase):
     def test_major_minor_directive(self):
-        self.assertEqual(cgv.parse_go_directive("go.mod", "go 1.26\n"), (1, 26))
+        self.assertEqual(cgv.parse_go_directive("go.mod", "go 1.26\n"), (1, 26, 0))
 
-    def test_patch_directive_returns_series(self):
+    def test_patch_directive_returns_major_minor_patch(self):
         self.assertEqual(
             cgv.parse_go_directive("go.mod", "module m\n\ngo 1.26.4\n"),
-            (1, 26),
+            (1, 26, 4),
         )
 
     def test_indented_directive(self):
-        self.assertEqual(cgv.parse_go_directive("go.mod", "  go 1.26.4\n"), (1, 26))
+        self.assertEqual(
+            cgv.parse_go_directive("go.mod", "  go 1.26.4\n"), (1, 26, 4)
+        )
 
     def test_tab_separated_directive(self):
-        self.assertEqual(cgv.parse_go_directive("go.mod", "go\t1.26\n"), (1, 26))
+        self.assertEqual(cgv.parse_go_directive("go.mod", "go\t1.26\n"), (1, 26, 0))
 
     def test_first_directive_wins(self):
         text = "module m\n\ngo 1.26\n\ngo 1.25\n"
-        self.assertEqual(cgv.parse_go_directive("go.mod", text), (1, 26))
+        self.assertEqual(cgv.parse_go_directive("go.mod", text), (1, 26, 0))
 
     def test_missing_directive(self):
         with self.assertRaises(cgv.CheckError):
