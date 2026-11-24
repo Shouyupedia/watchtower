@@ -1,0 +1,42 @@
+# Zizmor configuration for workflow security auditing.
+# Every relaxation is narrowed to the exact file (and line where the file is
+# maintained) with its rationale.
+#
+# TEMPORARY: the file-level release.yml entries under artipacked,
+# cache-poisoning, excessive-permissions and unpinned-uses cover the legacy
+# release workflow, which is deliberately left untouched until PR 5 replaces it.
+# Remove all four entries in the same PR that replaces release.yml.
+rules:
+  artipacked:
+    ignore:
+      - release.yml # TEMPORARY until PR 5: checkouts persist credentials
+
+  cache-poisoning:
+    ignore:
+      - release.yml # TEMPORARY until PR 5: setup-go caching is enabled
+
+  excessive-permissions:
+    ignore:
+      - release.yml # TEMPORARY until PR 5: no top-level/lint/test permissions
+
+  unpinned-uses:
+    ignore:
+      - release.yml # TEMPORARY until PR 5: actions pinned by tag, not SHA
+
+  dependabot-cooldown:
+    # Design spec §5.1/§5.3 intentionally uses a 3-day cooldown for Go module
+    # patch updates (minor=7d, major=30d; docker/pip/github-actions=7d).
+    ignore:
+      - dependabot.yml:9
+      - dependabot.yml:24
+
+  self-repository:
+    # actionlint v1.7.12 rejects the newer "$/..." syntax and requires "./..."
+    # for local composite actions and reusable workflows.
+    ignore:
+      - ci.yml:181
+      - docker-publish.yml:88
+      - docker.yml:48
+      - pull-request.yml:17
+      - push-main.yml:14
+      - push-main.yml:24

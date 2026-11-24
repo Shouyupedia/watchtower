@@ -7,7 +7,7 @@ launching watchtower.
 $ docker run -d \
     --name watchtower \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    containrrr/watchtower \
+    ghcr.io/shouyupedia/watchtower \
     nginx redis
 ```
 
@@ -18,7 +18,7 @@ the watchtower container after its execution.
 ```bash
 $ docker run --rm \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    containrrr/watchtower \
+    ghcr.io/shouyupedia/watchtower \
     --run-once \
     nginx redis
 ```
@@ -99,7 +99,7 @@ Environment Variable: WATCHTOWER_REMOVE_VOLUMES
 Enable debug mode with verbose logging.
 
 !!! note "Notes"  
-    Alias for `--log-level debug`. See [Maximum log level](#maximum-log-level).  
+    Alias for `--log-level debug`. See [Maximum log level](#maximum_log_level).  
     Does _not_ take an argument when used as an argument. Using `--debug true` will **not** work.
 
 ```text
@@ -113,7 +113,7 @@ Environment Variable: WATCHTOWER_DEBUG
 Enable trace mode with very verbose logging. Caution: exposes credentials!
 
 !!! note "Notes"  
-    Alias for `--log-level trace`. See [Maximum log level](#maximum-log-level).  
+    Alias for `--log-level trace`. See [Maximum log level](#maximum_log_level).  
     Does _not_ take an argument when used as an argument. Using `--trace true` will **not** work.
 
 ```text
@@ -247,7 +247,7 @@ Environment Variable: WATCHTOWER_DISABLE_CONTAINERS
 
 ## Without updating containers
 Will only monitor for new images, send notifications and invoke
-the [pre-check/post-check hooks](https://containrrr.dev/watchtower/lifecycle-hooks/), but will __not__ update the
+the [pre-check/post-check hooks](lifecycle-hooks.md), but will __not__ update the
 containers.
 
 !!! note
@@ -264,7 +264,7 @@ Environment Variable: WATCHTOWER_MONITOR_ONLY
 
 Note that monitor-only can also be specified on a per-container basis with the `com.centurylinklabs.watchtower.monitor-only` label set on those containers.
 
-See [With label taking precedence over arguments](#With-label-taking-precedence-over-arguments) for behavior when both argument and label are set
+See [With label taking precedence over arguments](#with_label_taking_precedence_over_arguments) for behavior when both argument and label are set
 
 ## With label taking precedence over arguments
 
@@ -303,7 +303,7 @@ Environment Variable: WATCHTOWER_NO_PULL
 Note that no-pull can also be specified on a per-container basis with the
 `com.centurylinklabs.watchtower.no-pull` label set on those containers.
 
-See [With label taking precedence over arguments](#With-label-taking-precedence-over-arguments) for behavior when both argument and label are set
+See [With label taking precedence over arguments](#with_label_taking_precedence_over_arguments) for behavior when both argument and label are set
 
 ## Without sending a startup message
 Do not send a message after watchtower started. Otherwise there will be an info-level notification.
@@ -327,7 +327,7 @@ Environment Variable: WATCHTOWER_RUN_ONCE
 
 ## HTTP API Mode
 Runs Watchtower in HTTP API mode, only allowing image updates to be triggered by an HTTP request. 
-For details see [HTTP API](https://containrrr.dev/watchtower/http-api-mode).
+For details see [HTTP API](http-api-mode.md).
 
 ```text
             Argument: --http-api-update
@@ -359,7 +359,7 @@ Environment Variable: WATCHTOWER_HTTP_API_PERIODIC_POLLS
 
 ## Filter by scope
 Update containers that have a `com.centurylinklabs.watchtower.scope` label set with the same value as the given argument. 
-This enables [running multiple instances](https://containrrr.dev/watchtower/running-multiple-instances).
+This enables [running multiple instances](running-multiple-instances.md).
 
 !!! note "Filter by lack of scope"
     If you want other instances of watchtower to ignore the scoped containers, set this argument to `none`.

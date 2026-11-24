@@ -1,33 +1,32 @@
-build:
-  main: ./main.go
-  binary: watchtower
-  goos:
-    - linux
-    - windows
-  goarch:
-    - amd64
-    - 386
-    - arm
-    - arm64
-  ignore:
-    # the 32-bit windows/arm port was removed in Go 1.26
-    - goos: windows
-      goarch: arm
-  ldflags:
-    - -s -w -X github.com/containrrr/watchtower/internal/meta.Version={{.Version}}
+version: 2
+
+project_name: watchtower
+
+builds:
+  - main: ./main.go
+    binary: watchtower
+    env:
+      - CGO_ENABLED=0
+    # Exactly the six targets shipped in v1.0.0. The matrix form
+    # (goos x goarch) would add windows/arm64, which v1.0.0 does not have.
+    targets:
+      - linux_amd64
+      - linux_386
+      - linux_arm_6
+      - linux_arm64
+      - windows_amd64
+      - windows_386
+    ldflags:
+      - -s -w -X github.com/containrrr/watchtower/internal/meta.Version={{.Version}}
+
 archives:
-  - 
-    name_template: "{{.ProjectName}}_{{.Os}}_{{.Arch}}"
-    format: tar.gz
-    replacements:
-      arm: armhf
-      arm64: arm64v8
-      amd64: amd64
-      386: 386
-      darwin: macOS
-      linux: linux
+  - name_template: >-
+      {{ .ProjectName }}_{{ .Os }}_{{ if eq .Arch "arm" }}armhf{{ else if eq .Arch "arm64" }}arm64v8{{ else }}{{ .Arch }}{{ end }}
+    formats:
+      - tar.gz
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
     files:
       - LICENSE.md

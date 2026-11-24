@@ -30,9 +30,9 @@ If you dont have it enabled, you'll either have to prefix each command with `GO1
 
 To build a Watchtower image of your own, use the self-contained Dockerfiles. As the main Dockerfile, they can be found in `dockerfiles/`:
 - `dockerfiles/Dockerfile.dev-self-contained` will build an image based on your current local Watchtower files.
-- `dockerfiles/Dockerfile.self-contained` will build an image based on current Watchtower's repository on GitHub.
+- `dockerfiles/Dockerfile.self-contained` also builds the local source tree: it copies the current working directory into the builder stage, then compiles it and runs the test suite there, so it does not require any pre-built binaries.
 
 e.g.:
 ```bash
-sudo docker build . -f dockerfiles/Dockerfile.dev-self-contained -t containrrr/watchtower # to build an image from local files
+sudo docker build . -f dockerfiles/Dockerfile.dev-self-contained -t ghcr.io/shouyupedia/watchtower # to build an image from local files
 ```

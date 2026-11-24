@@ -1,0 +1,32 @@
+name: Push to main
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ github.sha }}
+    permissions:
+      contents: read
+
+  publish-dev:
+    name: Publish latest-dev
+    needs: ci
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      ref: ${{ github.sha }}
+      disable_cache: true
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write

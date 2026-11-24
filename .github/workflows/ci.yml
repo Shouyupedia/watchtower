@@ -1,0 +1,242 @@
+name: CI
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Optional Git ref or commit SHA to check out (defaults to event ref)
+        type: string
+        required: false
+        default: ''
+
+permissions: {}
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: .go-version
+      - name: Run staticcheck
+        run: go tool -modfile=tools/go.mod staticcheck ./...
+
+  test:
+    name: test (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: .go-version
+      - name: Run tests
+        run: go test -v -coverprofile coverage.out -covermode atomic ./...
+
+  mod-check:
+    name: mod-check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: .go-version
+      - name: Verify and check tidy for root module
+        run: |
+          go mod verify
+          go mod tidy -diff
+      - name: Verify and check tidy for tools module
+        working-directory: tools
+        run: |
+          go mod verify
+          go mod tidy -diff
+
+  version-consistency:
+    name: version-consistency
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+      - name: Check Go version consistency
+        run: python -I scripts/check-go-version.py
+
+  vuln:
+    name: vuln
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: .go-version
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+      - name: Run govulncheck across release targets and evaluate gate
+        shell: bash
+        run: bash scripts/run-govulncheck.sh
+
+  script-tests:
+    name: script-tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+      - name: Run Python script unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I -m unittest discover -s scripts -p "test_*.py" -v
+          if [ -d .github/scripts ]; then
+            python -I -m unittest discover -s .github/scripts -p "test_*.py" -v
+          fi
+
+  goreleaser-snapshot:
+    name: goreleaser-snapshot
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: .go-version
+      - name: Build snapshot release
+        run: go tool -modfile=tools/go.mod goreleaser release --snapshot --clean
+      - name: Verify release contract
+        run: bash scripts/check-release-contract.sh dist
+
+  docker-build:
+    name: docker-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Build multi-arch Docker image (read-only)
+        uses: ./.github/actions/docker-build
+        with:
+          push: 'false'
+          version: dev
+
+  docs-build:
+    name: docs-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: .go-version
+      - name: Build tplprev
+        run: bash scripts/build-tplprev.sh
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: docs-requirements.txt
+      - name: Install docs dependencies
+        run: pip install --require-hashes -r docs-requirements.txt
+      - name: Build docs (strict)
+        run: mkdocs build --strict
+
+  workflow-lint:
+    name: workflow-lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: .go-version
+      - name: Run actionlint
+        run: go tool -modfile=tools/go.mod actionlint
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: .github/zizmor-requirements.txt
+      - name: Install workflow linters
+        run: pip install --require-hashes -r .github/zizmor-requirements.txt
+      - name: Run zizmor
+        run: zizmor --min-severity low .github/
+      - name: Validate Dependabot config
+        run: check-jsonschema --builtin-schema vendor.dependabot .github/dependabot.yml
