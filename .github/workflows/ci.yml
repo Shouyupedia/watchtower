@@ -54,6 +54,66 @@ jobs:
           go-version-file: .go-version
       - name: Run tests
         run: go test -v -coverprofile coverage.out -covermode atomic ./...
+      - name: Build macOS release binaries
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CGO_ENABLED: '0'
+          GOOS: darwin
+        run: |
+          set -euo pipefail
+          ldflags="-s -w -X github.com/containrrr/watchtower/internal/meta.Version=smoke-test"
+          mkdir -p "$RUNNER_TEMP/macos-smoke"
+          GOARCH=arm64 go build -ldflags "$ldflags" -o "$RUNNER_TEMP/macos-smoke/watchtower-darwin-arm64" ./main.go
+          GOARCH=amd64 go build -ldflags "$ldflags" -o "$RUNNER_TEMP/macos-smoke/watchtower-darwin-amd64" ./main.go
+      - name: Verify macOS binary architecture and signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_macho() {
+            local path="$1" expected="$2" desc
+            desc="$(file -b "$path")"
+            echo "$path: $desc"
+            case "$desc" in
+            *"Mach-O 64-bit executable $expected"*) ;;
+            *)
+              echo "unexpected architecture for $path: $desc" >&2
+              exit 1
+              ;;
+            esac
+          }
+          check_macho "$RUNNER_TEMP/macos-smoke/watchtower-darwin-arm64" arm64
+          check_macho "$RUNNER_TEMP/macos-smoke/watchtower-darwin-amd64" x86_64
+          codesign -v "$RUNNER_TEMP/macos-smoke/watchtower-darwin-arm64"
+          echo "arm64 ad-hoc code signature verified"
+      - name: Run macOS release binaries without Docker
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          host_arch="$(uname -m)"
+          echo "runner architecture: $host_arch"
+          case "$host_arch" in
+          arm64)
+            "$RUNNER_TEMP/macos-smoke/watchtower-darwin-arm64" --help > /dev/null
+            echo "ran native arm64 binary (--help)"
+            if arch -x86_64 /usr/bin/true 2> /dev/null; then
+              "$RUNNER_TEMP/macos-smoke/watchtower-darwin-amd64" --help > /dev/null
+              echo "ran amd64 binary under Rosetta (--help)"
+            else
+              echo "Rosetta unavailable; amd64 binary was only build-verified"
+            fi
+            ;;
+          x86_64)
+            "$RUNNER_TEMP/macos-smoke/watchtower-darwin-amd64" --help > /dev/null
+            echo "ran native amd64 binary (--help)"
+            ;;
+          *)
+            echo "unexpected runner architecture: $host_arch" >&2
+            exit 1
+            ;;
+          esac
 
   mod-check:
     name: mod-check
