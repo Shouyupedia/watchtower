@@ -1,0 +1,27 @@
+{
+  "number": 42,
+  "state": "open",
+  "draft": false,
+  "commits": 1,
+  "title": "Bump example.com/mod from 1.2.3 to 1.2.4",
+  "body": "Bumps [example.com/mod](https://example.com/mod) from 1.2.3 to 1.2.4.\n<details>\n<summary>Release notes</summary>\n<p>Synthetic release notes for unit tests.</p>\n</details>\n",
+  "user": {
+    "login": "dependabot[bot]"
+  },
+  "labels": [
+    {
+      "name": "dependencies"
+    }
+  ],
+  "base": {
+    "ref": "main",
+    "sha": "1111111111111111111111111111111111111111"
+  },
+  "head": {
+    "ref": "dependabot/go_modules/example.com/mod-1.2.4",
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "repo": {
+      "full_name": "example-org/example-repo"
+    }
+  }
+}

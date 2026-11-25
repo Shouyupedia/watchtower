@@ -1,0 +1,132 @@
+name: Go Toolchain Sync
+
+on:
+  schedule:
+    - cron: '17 2 * * 1'
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: go-toolchain-sync
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check Go toolchain updates
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read # list the open automation/go-toolchain PR (read-only)
+    outputs:
+      needs_sync: ${{ steps.check.outputs.needs_sync }}
+      main_sha: ${{ steps.check.outputs.main_sha }}
+      current_version: ${{ steps.check.outputs.current_version }}
+      target_version: ${{ steps.check.outputs.target_version }}
+      cross_minor: ${{ steps.check.outputs.cross_minor }}
+      docker_digest: ${{ steps.check.outputs.docker_digest }}
+      toolchain_first_seen: ${{ steps.check.outputs.toolchain_first_seen }}
+      docker_last_pushed: ${{ steps.check.outputs.docker_last_pushed }}
+      expected_pr_number: ${{ steps.check.outputs.expected_pr_number }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+
+      - name: Check upstream Go releases and cooldowns
+        id: check
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          MAIN_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python -I .github/scripts/go_toolchain_sync.py check \
+            --repository "$GITHUB_REPOSITORY" \
+            --event-name "$EVENT_NAME" \
+            --main-sha "$MAIN_SHA" \
+            --github-output "$GITHUB_OUTPUT"
+
+  sync:
+    name: Sync Go toolchain PR
+    needs: check
+    if: github.ref == 'refs/heads/main' && needs.check.outputs.needs_sync == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: updater
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout verified main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.check.outputs.main_sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version-file: .python-version
+
+      - name: Set up target Go for cross-minor tidy
+        if: needs.check.outputs.cross_minor == 'true'
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: ${{ needs.check.outputs.target_version }}
+          cache: false
+
+      - name: Prepare Go toolchain sync bundle
+        shell: bash
+        env:
+          MAIN_SHA: ${{ needs.check.outputs.main_sha }}
+          TARGET_VERSION: ${{ needs.check.outputs.target_version }}
+          DOCKER_DIGEST: ${{ needs.check.outputs.docker_digest }}
+          TOOLCHAIN_FIRST_SEEN: ${{ needs.check.outputs.toolchain_first_seen }}
+          DOCKER_LAST_PUSHED: ${{ needs.check.outputs.docker_last_pushed }}
+          EXPECTED_PR_NUMBER: ${{ needs.check.outputs.expected_pr_number }}
+        run: |
+          set -euo pipefail
+          python -I .github/scripts/go_toolchain_sync.py prepare \
+            --main-sha "$MAIN_SHA" \
+            --target-version "$TARGET_VERSION" \
+            --docker-digest "$DOCKER_DIGEST" \
+            --toolchain-first-seen "$TOOLCHAIN_FIRST_SEEN" \
+            --docker-last-pushed "$DOCKER_LAST_PUSHED" \
+            --expected-pr-number "$EXPECTED_PR_NUMBER" \
+            --output-bundle "$RUNNER_TEMP/go-toolchain-sync-bundle.json"
+
+      - name: Mint watchtower-updater token
+        id: updater-token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          app-id: ${{ secrets.UPDATER_APP_ID }}
+          private-key: ${{ secrets.UPDATER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Publish signed commit and pull request
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ steps.updater-token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python -I .github/scripts/go_toolchain_sync.py publish \
+            --bundle "$RUNNER_TEMP/go-toolchain-sync-bundle.json" \
+            --repository "$GITHUB_REPOSITORY"

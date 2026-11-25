@@ -1,0 +1,27 @@
+{
+  "number": 44,
+  "state": "open",
+  "draft": false,
+  "commits": 1,
+  "title": "chore(deps): bump Go toolchain to 1.26.11",
+  "body": "Synthetic Go toolchain same-minor patch update.",
+  "user": {
+    "login": "watchtower-updater[bot]"
+  },
+  "labels": [
+    {
+      "name": "dependencies"
+    }
+  ],
+  "base": {
+    "ref": "main",
+    "sha": "1111111111111111111111111111111111111111"
+  },
+  "head": {
+    "ref": "automation/go-toolchain",
+    "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "repo": {
+      "full_name": "example-org/example-repo"
+    }
+  }
+}

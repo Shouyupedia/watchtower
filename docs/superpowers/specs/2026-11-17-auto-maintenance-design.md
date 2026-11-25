@@ -1,6 +1,6 @@
 # 自动维护设计（全依赖自动升级、受控自动合并、定期发布、去除上游残留）
 
-日期：2026-11-17（修订：2026-11-24）
+日期：2026-11-17（修订：2026-11-25）
 状态：已修订，待批准
 
 ## 1. 意图
@@ -51,12 +51,12 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
 ## 3. 约束
 
 - **仓库设置与私有 GitHub App 需由维护者创建配置。** 本设计不假设会话工具可以直接修改 GitHub 远端配置。2026-11-24 已通过 `gh api` 只读核实远端现状，需要维护者手动完成的创建与配置步骤列在第 8 节。
-- **fork 仓库上 Dependabot 默认关闭。** `gh api` 实测当前仓库 `dependabot_security_updates` 与 `dependabot/alerts` 均为关闭，`allow_auto_merge` 为 `false`，`rulesets` 为空，`has_issues: false`。
+- **fork 仓库上 Dependabot 默认关闭。** 2026-11-24 基线通过 `gh api` 实测：`dependabot_security_updates` 与 `dependabot/alerts` 均为关闭，`allow_auto_merge` 为 `false`，`rulesets` 为空，`has_issues: false`（2026-11-25 M1/M2 已完成，详见 `d3484b7` 与 §7：`dependabot_security_updates`、`vulnerability-alerts` 及 `main-checks`/`main-review` Ruleset 已启用，`allow_auto_merge: false` 与 `has_issues: false` 保持不变）。
 - **公开仓库的定时工作流会在 60 天无活动后自动停用。** `gh api` 实测 `CodeQL` 定时任务已在每周正常运行（最近一次 2026-11-19），但这仅证明 `CodeQL` 本身处于启用状态；新建的 `go-toolchain-sync.yml` 与 `scheduled-release.yml` 合入后仍需单独确认处于 `active` 状态，且所有定时工作流都受 60 天无活动自动禁用限制。
 - **Dependabot 的能力边界与特殊限制：**
   - `pull_request` 事件下读不到 Actions secrets，`CODECOV_TOKEN` 为空，覆盖率上传要能容忍失败。
   - **Dependabot 不会主动升级 `go.mod` 中的 Go 工具链版本**（上游 `dependabot-core#13520` 尚未实现），需通过独立定时工作流跟踪官方稳定版。
-  - 冷却期（`cooldown`）支持范围有限：`gomod` 支持按 semver 级别设天数；`github-actions`、`docker`、`pip` 只支持 `default-days`。冷却期只对 version updates 生效，**不对 security updates 生效**；Docker 冷却期目前仅依赖 Docker Hub 的 `tag_last_pushed`，无可用日期时会 fail-open；`gomod` 更新直接依赖时连带引入的新传递依赖也不受直接依赖 `update-type` 的约束。
+  - 冷却期（`cooldown`）支持范围有限：`gomod` 支持按 semver 级别设天数；`github-actions`、`docker`、`pip` 只支持 `default-days`。冷却期只对 version updates 生效，**不对 security updates 生效**；Dependabot 自身的 Docker 冷却期目前仅依赖 Docker Hub 的 `tag_last_pushed`，无可用日期时会 fail-open（因此由 §5.1 的独立核验做 fail-closed 兜底）；`gomod` 更新直接依赖时连带引入的新传递依赖也不受直接依赖 `update-type` 的约束。
 - **可复用工作流的权限静态校验与上下文归属：**
   - 嵌套任务若请求超出调用方授权的权限，整个工作流在启动阶段即报无效失败（`if` 跳过也无效），因此只读验证与可信发布必须拆分为独立工作流。
   - 可复用工作流的 `github` 上下文属于调用方（如定时发布调用 `release.yml` 时 `github.ref_name` 是 `main`），被调用方必须显式接收并校验 `tag` 与 `sha` 输入。
@@ -84,7 +84,7 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
    - **`main-review`（强制维护者审核）**：配合 `.github/CODEOWNERS`（`* @Shouyupedia`），启用 **`Required approvals = 1`**、**`Require review from Code Owners`**、**`Dismiss stale pull request approvals when new commits are pushed`** 与 **`Require approval of the most recent reviewable push`**。Bypass 列表仅授予**专用合并 App（`watchtower-automerge`）**与 **`Repository admin`**（方法 B），模式均为 **`For pull requests only`**。
 2. **PR 工作流纯只读，合并决策与凭据固定在 `main`**：
    - `pull-request.yml` 仅声明 `contents: read`，只跑验证，不持有任何写权限或 App 凭据。
-   - `automerge.yml` 驻留在 `main` 分支，由 `workflow_run` 在 `Pull Request` 或 `CodeQL` 工作流完成时触发；它**不检出 PR 代码、不下载或信任任何 PR artifact**，而是直接查询 GitHub API 与上游注册表做独立核验，全部通过后才在仅限 `main` 访问的 `automerge` Environment 中签发合并 App 令牌，调用 `PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge`（携带 `"sha": "<head_sha>"`）完成合并。
+   - `automerge.yml` 驻留在 `main` 分支，由 `workflow_run` 在 `Pull Request` 或 `CodeQL` 工作流完成时触发；它**不检出 PR 代码、不下载或信任任何 PR artifact**，而是直接查询 GitHub API 与上游注册表做独立核验，全部通过后才在仅限 `main` 访问的 `automerge` Environment 中签发合并 App 令牌，调用 `PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge`（携带 `"sha": "<head_sha>"` 与 `"merge_method": "merge"`，对齐 M2 生效的 `main-checks` `allowed_merge_methods: ["merge"]`）执行单次合并；HTTP 405/409 视为预期非重试结果正常退出。
 3. **方法 B 的准确安全边界**：
    - 外部贡献者 PR、未进白名单的 Dependabot PR（Actions、大版本、安全更新）与跨次版本 Go 升级 PR，`automerge.yml` 均判定 `eligible=false` 不予合并，默认停在 `main-review` 等待维护者本人点 Approve。
    - `Repository admin` 在 `main-review` 上的 `For pull requests only` 绕过权在 GitHub 平台层面**对所有 PR 均有效**（GitHub 无法将其限制为仅自提 PR 或仅网页端操作）；维护者约定仅在本人自提 PR（因 GitHub 禁止自审）经审阅且 `main-checks` 全绿后使用该绕过，同时**绝不将带有仓库 admin 权限的个人 token 交给外部工具或自动化 Agent**（管理员 token 同样拥有绕过审批的能力）。
@@ -101,18 +101,18 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
    - 配置层冷却期：`gomod`（`/` 与 `/tools`）补丁版 3 天、次版本 7 天、大版本 30 天；`docker` 7 天；`pip` 7 天；`github-actions` 7 天；`go-toolchain-sync.yml` 7 天。
    - **Dependabot security updates 全部转人工，永不自动合并**（安全更新不受冷却期保护）。
    - **合并前正向核验可信来源的"首次公开可见时间"（不依赖 PR 正文缺少告警，也不把可伪造的提交时间当发布时间）**：
-     - `go_modules`：`proxy.golang.org` 的 `.info` 接口返回的 `Time` 是上游 VCS 提交时间（可被回填伪造），不能单独证明公开发布时长。校验任务改为查询可信公开索引记录的**首次公开可见时间**（如官方只追加索引 `index.golang.org/index` 中该模块版本首次入库的 `Timestamp`），核实补丁版已满 3 天、次版本及连带新增传递依赖已满 7 天；若缺少可信首次可见时间记录或未满天数，一律输出 `eligible=false` 转人工审核。
-     - `docker`：向 Docker Hub API 正向查询目标镜像标签及 normalized digest 对应的注册表推送时间 `tag_last_pushed`，核实已满 7 天；查不到或未满即 `eligible=false`。
-     - `pip`：向 PyPI JSON API（`https://pypi.org/pypi/<pkg>/<version>/json`）查询注册表侧记录的文件上传时间（`upload_time_iso_8601`），核实已满 7 天；查不到或未满即 `eligible=false`。
-     - Go 工具链同步：同样不依赖 `.info` 的提交时间，改为核对可信公开来源记录的首次公开可见时间（如 `index.golang.org` 中对应 `golang.org/toolchain` 条目的入库 `Timestamp`；若缺少索引记录，则以更新流程首次观察并记录该稳定版的时间起算，或直接转人工审核），且 Docker Hub `golang:<version>-alpine` 对应 digest 的 `tag_last_pushed` 也已满 7 天。
+     - `go_modules`：`proxy.golang.org` 的 `.info` 接口返回的 `Time` 是上游 VCS 提交时间（可被回填伪造），不能单独证明公开发布时长，因此只作为前向扫描起点提示（`since = Time - 60s`）。校验任务在固定 10 次请求预算内（1 次 `.info` + 最多 9 页 `index.golang.org/index`、每页上限 2000 条）定位精确 `(Path, Version)` 的首次入库 `Timestamp`，核实补丁版已满 3 天、次版本及连带新增传递依赖已满 7 天；实测样本中约 6/12 个 Go 模块命中，超出预算或缺少可信首次可见时间记录、或未满天数时一律 fail-closed 输出 `eligible=false` 转人工审核。
+     - `docker`：向 Docker Hub API 正向查询目标镜像标签及 normalized digest 对应的注册表推送时间 `tag_last_pushed`，核实已满 7 天；查不到、digest 不一致或未满即 fail-closed 输出 `eligible=false`。
+     - `pip`：向 PyPI JSON API（`https://pypi.org/pypi/<pkg>/<version>/json`）查询锁文件中该包该版本**所有允许的 `--hash=sha256:...`** 对应文件的注册表上传时间（`upload_time_iso_8601`），取全部允许文件里的**最晚**上传时间核实已满 7 天；任一允许 hash 找不到对应文件、缺少时间戳或未满 7 天即 fail-closed 输出 `eligible=false`。
+     - Go 工具链同步：同样不依赖 `.info` 的提交时间，`go_toolchain_sync.py` 与 `automerge_verify.py` 均在 10 次请求预算内查询 `index.golang.org` 中 `golang.org/toolchain` 对应条目的入库 `Timestamp`（未实现“更新流程首次观察起算”回退），且核实 Docker Hub `golang:<version>-alpine` 对应 digest 的 `tag_last_pushed` 已满 7 天。PR 4 实测中 `golang.org/toolchain` 样本在 10 次请求预算内未命中；按 fail-closed 原则，凡在预算内未命中的版本均会阻止该次 `go-toolchain-sync.yml` 创建/更新工具链 PR（`needs_sync=False`），同时 `automerge.yml` 亦对该版本返回 `eligible=false`。
 3. **自动合并白名单（`main` 侧独立 API 核验、fail-closed）。**
    - `automerge.yml` 的只读任务 `verify` 直接调用 GitHub API 独立获取数据，**任何字段缺失、状态未就绪、API 异常或超出白名单的情况一律正常结束并输出 `eligible=false`**（留给人工审批）：
      - **`workflow_run` 事件过滤、PR 绑定与双 SHA 区分**：由于 `CodeQL` 同时也会被 `schedule` 和 `push` 触发，`verify` 任务首先要求 `workflow_run.event == "pull_request"` 且 `workflow_run.head_repository.full_name == 本仓库`；随后通过 GitHub API 查询本仓库当前 `open`、`draft == false`、`base.ref == "main"`、`head.repo.full_name == 本仓库` 的唯一目标 PR，确认实时 `pr.head.sha == workflow_run.head_sha`。**严格区分两类 SHA**：① **PR `head_sha`**（分支顶端提交，用于核对提交签名链、验证工作流 `head_sha` 归属，并作为预期 `sha` 传给 REST 合并接口）；② **CI 临时合并提交 SHA**（`refs/pull/<n>/merge`，`pull_request` 工作流默认检出测试的合并预览提交；配合零豁免 `main-checks` 的 `Require branches to be up to date before merging`，确保 `main` 若在测试后前进，旧的临时合并结果失效并拒绝合入）。
      - **必需检查全绿**：查询本仓库关联到该 PR 同一个 `head_sha` 的 `Pull Request` 工作流与 `CodeQL`（`event == "pull_request"`）工作流运行记录，确认两者均已完成且结论为 `success`，同时查询 `head_sha` 上的必需 check-runs 状态全部通过（若另一工作流仍在运行则本次静默退出，待最后完成的工作流触发时再合入）。
      - **可信机器人身份绑定**：`pr.user.login` 仅允许 `dependabot[bot]` 或 `watchtower-updater[bot]`，**绝不凭分支名、PR 标签或通用 `github-actions[bot]` 放行**。
      - **完整提交列表与签名校验**：分页拉取 PR 的全部提交并核对条数等于 `pr.commits`；要求每一个提交都满足 `commit.verification.verified == true`、`author.login` 等于该 PR 作者机器人，且 `committer.login` 仅限 `web-flow` 或该机器人本身。**禁止调用 `update-branch` 向自动 PR 注入合并提交**（否则会引入非机器人提交破坏签名链）。
-     - **拒绝安全更新**：核查 PR 不关联 Dependabot 安全告警，也不带 security 相关标签或安全更新元数据。
-     - **敏感路径硬禁区**：PR 修改的文件列表中绝对禁止出现 `.github/workflows/**`、`.github/actions/**`、`.github/CODEOWNERS`、`.github/dependabot.yml`。
+     - **拒绝安全更新（含校准边界）**：核查 PR 不关联 Dependabot 安全告警，也不带 security 相关标签或安全更新元数据，且必须命中经过真实样本校准的普通更新正向信号。当前仓库尚无真实 Dependabot 普通更新 + 安全更新成对样本，`.github/scripts/fixtures/` 中的 Dependabot 与工具链夹具均为手工合成夹具（仅 `human_pr13_replay.json` 为脱敏后的真实人工 PR #13 离线回放样本），因此 `CALIBRATED_NORMAL_UPDATE_SIGNALS` 有意保持为空（`frozenset()`），所有 Dependabot PR 均 fail-closed 返回 `eligible=false` 转人工审核，待 M3 取得真实成对样本校准后再启用。
+     - **敏感路径硬禁区**：PR 修改的文件列表中绝对禁止出现 `.github/workflows/**`、`.github/actions/**`、`.github/scripts/**`、`.github/CODEOWNERS`、`.github/dependabot.yml`（及任意路径下的 `CODEOWNERS`、`dependabot.yml`、`dependabot.yaml`）。
      - **按机器人与生态执行精确文件及行级 diff 白名单**：
        - **当作者为 `dependabot[bot]` 时**，从 `head.ref` 前缀解析生态，仅允许 `go_modules`、`docker`、`pip`（`github_actions` 永远返回 `eligible=false`）：
          - `go_modules`：改动文件仅限 `go.mod`/`go.sum` 或 `tools/go.mod`/`tools/go.sum`；解析新旧 `go.mod`，**禁止新增、删除或修改 `go`、`toolchain`、`replace`、`exclude`、`retract`、`tool` 指令**，仅允许 `require` 条目的补丁版或次版本升级（拒绝任何主版本变更），且所有变更/新增模块通过可信首次公开可见时间冷却期核验。
@@ -125,18 +125,20 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
    - 所有工作流的 `uses:` 钉到完整 commit SHA 并附版本注释，由 Dependabot 维护（人工审核合并）。
    - **新增 `.go-version` 作为精确 Go 补丁版本的唯一来源**：所有工作流中的 `actions/setup-go` 统一使用 `go-version-file: .go-version`（不再写浮动的 `1.26.x`，也无需在升级 Go 时改动 `.github/workflows/**`）。`go.mod` 与 `tools/go.mod` 的 `go` 指令代表模块要求的**最低 Go 语言版本**，日常补丁升级保持不变，仅在跨次版本升级 PR 中由 `go-toolchain-sync.yml` 同步调整并交维护者审核。
    - 三个 Dockerfile 的 `golang:<ver>-alpine` 全部钉 `@sha256:` digest。
-   - **迁移 `goreleaser.yml` 至 GoReleaser v2 并纳入 `tools/go.mod`**：本次将 `goreleaser.yml` 升级为 v2 配置语法，并用 snapshot 构建严格核对输出平台（`linux`/`windows` × `amd64`/`386`/`arm`/`arm64`，排除 `windows/arm`）、归档格式与架构别名（`armhf`、`arm64v8`、Windows `.zip`、附带 `LICENSE.md`）、`ldflags` 版本号注入以及 `checksums.txt` 与现有 `v1.0.0` 发布资产契约一致。随后将 `github.com/goreleaser/goreleaser/v2`、`staticcheck`、`govulncheck` 全部作为 `tool` 依赖写入独立模块 `tools/go.mod`，由 `tools/go.sum` 和 Go checksum database 校验并由 Dependabot 自动升级（移除写死 `v0.155.0` 的 `goreleaser/goreleaser-action`）。
+   - **迁移 `goreleaser.yml` 至 GoReleaser v2 并纳入 `tools/go.mod`**：本次将 `goreleaser.yml` 升级为 v2 配置语法，并用 snapshot 构建严格核对输出平台（`linux`/`windows` × `amd64`/`386`/`arm`/`arm64`，排除 `windows/arm`）、归档格式与架构别名（`armhf`、`arm64v8`、Windows `.zip`、附带 `LICENSE.md`）、`ldflags` 版本号注入以及 `checksums.txt` 与现有 `v1.0.0` 发布资产契约一致。随后将 `github.com/goreleaser/goreleaser/v2`、`github.com/rhysd/actionlint/cmd/actionlint`、`staticcheck`、`govulncheck` 全部作为 `tool` 依赖写入独立模块 `tools/go.mod`，由 `tools/go.sum` 和 Go checksum database 校验并由 Dependabot 自动升级（移除写死 `v0.155.0` 的 `goreleaser/goreleaser-action`）。
    - `docs-requirements.txt` 锁定全部直接与传递依赖的精确版本和 `--hash=sha256:...`（启用 `pip install --require-hashes`），文档工作流的 Python 版本钉死。
 5. **合并前检查（零豁免硬闸门 `main-checks`）。** 所有合入 `main` 的 PR 都必须通过下列必需检查：
-   - `staticcheck`（lint）
+   - `staticcheck`（lint，通过 `go tool -modfile=tools/go.mod staticcheck ./...` 运行）
    - `go test` 三平台矩阵（Linux / macOS / Windows）
    - `go mod verify` 与 `go mod tidy -diff`（同时检查根目录模块与 `tools/go.mod`）
-   - `govulncheck`：已知漏洞检查。**基线与豁免规则**：实现时先在 `main` 上运行 `govulncheck` 并升级清理当前可修复的基线漏洞（如旧版 `golang.org/x/net`）；对上游尚无修复或临时分属不同 PR 的漏洞，在仓库中维护带明确原因和到期日的限时豁免清单，再开启 PR 硬阻断。
+   - `version-consistency`：校验 `.go-version`、三个 `Dockerfile*` 与 `go.mod` / `tools/go.mod` 的 Go 版本一致性
+   - `govulncheck`：已知漏洞检查（`scripts/run-govulncheck.sh` 按 `.go-version` 钉死工具链并以 `go build -modfile=tools/go.mod` 为宿主机构建一次扫描器后覆盖各发布目标平台）。**基线与豁免规则**：实现时先在 `main` 上运行 `govulncheck` 并升级清理当前可修复的基线漏洞（如旧版 `golang.org/x/net`）；对上游尚无修复或临时分属不同 PR 的漏洞，在仓库中维护带明确原因和到期日的限时豁免清单，再开启 PR 硬阻断。
+   - `script-tests`：运行 `scripts/` 与 `.github/scripts/` 中的 Python 标准库单元测试（覆盖自动合并与工具链同步判定逻辑）
    - GoReleaser v2 snapshot 构建（`go tool -modfile=tools/go.mod goreleaser release --snapshot --clean`）
    - Docker 多架构只读构建（不推送、不请求写权限）
    - **文档只读严格构建**（`pip install --require-hashes -r docs-requirements.txt` + `scripts/build-tplprev.sh` + `mkdocs build --strict`，确保 `docs-requirements.txt` 自动升级与文档链接改动在合并前得到完整验证）
    - `actions/dependency-review-action`：PR 新引入或升级到的依赖如有已知漏洞即阻断
-   - `zizmor`：GitHub Actions 工作流静态审计，发现危险写法即阻断
+   - `workflow-lint`：`actionlint`（`go tool -modfile=tools/go.mod actionlint`）+ `zizmor`（固定版本与 hash 锁在 `.github/zizmor-requirements.txt`）+ `check-jsonschema` 校验 `dependabot.yml`，发现危险写法或配置错误即阻断
    - `CodeQL`：代码静态安全分析
 6. **最小权限与缓存隔离。**
    - 每个工作流顶层 `permissions: {}`，各任务只声明自身最小权限；调用可复用工作流时按需精确授权。
@@ -152,10 +154,10 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
 | 文件 | 触发 | 权限、环境与内容 |
 | --- | --- | --- |
 | `.github/actions/docker-build`（新，内部 composite action） | 被工作流复用 | 封装统一的 Dockerfile 路径、目标架构列表、`WATCHTOWER_VERSION` 与 OCI 标签参数，供只读验证与可信发布共享，不携带权限声明。 |
-| `ci.yml`（新，可复用） | `workflow_call`（输入 `ref`、`upload_coverage`） | 仅需 `contents: read`。包含 `staticcheck`、三平台 `go test`、根目录与 `/tools` 的 `go mod verify` / `go mod tidy -diff`、`govulncheck`、GoReleaser v2 snapshot、Docker 只读多架构构建、文档只读严格构建（`mkdocs build --strict`）、`zizmor`。确保 PR、`main` 推送与发版前共用唯一质量门槛。 |
+| `ci.yml`（新，可复用） | `workflow_call`（输入 `ref`、`upload_coverage`） | 仅需 `contents: read`。包含 `staticcheck`、三平台 `go test`、根目录与 `/tools` 的 `go mod verify` / `go mod tidy -diff`、`version-consistency`、`govulncheck`（`scripts/run-govulncheck.sh` 通过 `go build -modfile=tools/go.mod` 扫描各发布目标）、`script-tests`（`scripts/` 与 `.github/scripts/` 单元测试）、GoReleaser v2 snapshot、Docker 只读多架构构建、文档只读严格构建（`mkdocs build --strict`）、`workflow-lint`（`actionlint` + `zizmor` + `dependabot.yml` schema 校验）。确保 PR、`main` 推送与发版前共用唯一质量门槛。 |
 | `pull-request.yml`（改） | `pull_request` → `main` | 顶层 `permissions: {}`，**全程只读（`contents: read`）**。调用 `ci.yml` 与 `dependency-review`，不含任何合并或写权限任务。按 PR 设 `concurrency`，新提交取消旧运行。 |
-| `automerge.yml`（新） | `workflow_run`（监听 `["Pull Request", "CodeQL"]`，`types: [completed]`） | 固定取自 `main`，仅处理本仓库 `event == "pull_request"` 的运行（忽略 `CodeQL` 的 `push`/`schedule` 运行），按目标 PR 设串行 `concurrency`。<br>1. **`verify`（只读：`contents: read`、`pull-requests: read`、`checks: read`、`actions: read`）**：不检出 PR 代码、不读取 PR artifact；独立通过 API 解析本仓库唯一关联的开放目标 PR，区分 PR `head_sha` 与 CI 测试的临时合并 SHA，核实实时 `pr.head.sha == head_sha`、本仓 `Pull Request` 与 `CodeQL`（`pull_request` 事件）在该 `head_sha` 上均已 `success`、允许的机器人身份（`dependabot[bot]` 或 `watchtower-updater[bot]`）、完整已签名提交列表、非安全更新、敏感路径禁区、精确 diff 白名单与可信首次公开可见时间冷却期；任一未满足均正常结束并输出 `eligible=false`。<br>2. **`merge`（`needs: verify`，`if: needs.verify.outputs.eligible == 'true'`，`environment: automerge`）**：签发 `watchtower-automerge` App 短效令牌，调用 REST 接口 `PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge`（携带预期 `"sha": "<head_sha>"`）合入。若因并发合入导致分支落后于 `main` 被 `main-checks` 拒绝，不执行 `update-branch`，交由 Dependabot 自动 rebase 或 `go-toolchain-sync.yml` 重建分支后重跑 CI 再合。 |
-| `go-toolchain-sync.yml`（新） | 每周一 02:17 UTC；`push` → `main`；`workflow_dispatch` | 1. **检查任务（只读）**：查询 `go.dev/dl/?mode=json` 最新稳定版、可信来源记录的首次公开可见时间（如 `index.golang.org` 索引 `Timestamp`，缺少记录时从更新流程首次观察到该版本起计时）以及 Docker Hub `golang:<ver>-alpine` 最新 manifest digest 的 `tag_last_pushed`；仅采用同时满 7 天冷却期的目标版本。若与当前 `main` 一致且无待 rebase 的开放同步 PR，直接结束（`push` → `main` 触发时，仅在存在落后的开放 Go 同步分支时继续重放单提交 rebase）。<br>2. **提 PR 任务（`environment: updater`）**：签发 `watchtower-updater` App 短效令牌。同次版本补丁升级仅更新 `.go-version` 与 `dockerfiles/Dockerfile*` 的标签及 digest；跨次版本升级同步更新 `.go-version`、`go.mod` / `tools/go.mod` 的 `go` 指令（含必要的 `go mod tidy`）与 `Dockerfile*` 标签及 digest。通过 GraphQL `createCommitOnBranch` 生成 GitHub 自动签名的单提交并创建/更新 PR（触发 PR CI；补丁版走自动合并，跨次版本留待维护者审批）。 |
+| `automerge.yml`（新） | `workflow_run`（监听 `["Pull Request", "CodeQL"]`，`types: [completed]`） | 固定取自 `main`，仅处理本仓库 `event == "pull_request"` 的运行（忽略 `CodeQL` 的 `push`/`schedule` 运行），按目标 PR 设串行 `concurrency`。<br>1. **`verify`（只读：`contents: read`、`pull-requests: read`、`checks: read`、`actions: read`）**：检出 `main` 上的 `.github/scripts/automerge_verify.py`（Python 标准库，不检出 PR 代码、不读取 PR artifact）；独立通过 API 解析本仓库唯一关联的开放目标 PR，区分 PR `head_sha` 与 CI 测试的临时合并 SHA，核实实时 `pr.head.sha == head_sha`、本仓 `Pull Request` 与 `CodeQL`（`pull_request` 事件）在该 `head_sha` 上均已 `success`、允许的机器人身份（`dependabot[bot]` 或 `watchtower-updater[bot]`）、完整已签名提交列表、非安全更新（待真实成对样本校准前全部 Dependabot PR 暂转人工）、敏感路径禁区（含 `.github/scripts/**`）、精确 diff 白名单与可信首次公开可见时间冷却期；任一未满足均正常结束并输出 `eligible=false`。<br>2. **`merge`（`needs: verify`，`if: needs.verify.outputs.eligible == 'true'`，`environment: automerge`）**：签发 `watchtower-automerge` App 短效令牌，执行单次带预期 `sha` 保护的 REST 请求 `PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge`（`sha="$HEAD_SHA"`、`merge_method=merge`，对齐 M2 已生效的 `main-checks` `allowed_merge_methods: ["merge"]`）。不执行 `update-branch` 且不重试；HTTP 405（当前不可合并，如分支落后于 `main` 被 `main-checks` 拒绝）或 HTTP 409（`head_sha` 已变更）视为预期结果正常退出，交由 Dependabot 自动 rebase 或 `go-toolchain-sync.yml` 重建分支后重跑 CI 再合。 |
+| `go-toolchain-sync.yml`（新） | 每周一 02:17 UTC；`push` → `main`；`workflow_dispatch` | 1. **检查任务（只读）**：运行 `.github/scripts/go_toolchain_sync.py check`，查询 `go.dev/dl/?mode=json` 最新稳定版、`index.golang.org` 中 `golang.org/toolchain` 的首次入库 `Timestamp`（10 次请求预算，fail-closed，未实现“首次观察起算”回退；预算内未命中时会阻止该版本的同步尝试，不创建/更新 PR）以及 Docker Hub `golang:<ver>-alpine` 最新 manifest digest 的 `tag_last_pushed`；仅采用同时满 7 天冷却期的目标版本。若与当前 `main` 一致且无待 rebase 的开放同步 PR，直接结束（`push` → `main` 触发时，仅在存在落后的开放 Go 同步分支时继续重放单提交 rebase）。<br>2. **提 PR 任务（`environment: updater`）**：签发 `watchtower-updater` App 短效令牌。同次版本补丁升级仅更新 `.go-version` 与 `dockerfiles/Dockerfile*` 的标签及 digest；跨次版本升级同步更新 `.go-version`、`go.mod` / `tools/go.mod` 的 `go` 指令（含必要的 `go mod tidy`）与 `Dockerfile*` 标签及 digest。通过 GraphQL `createCommitOnBranch` 生成 GitHub 自动签名的单提交并创建/更新 PR（触发 PR CI；补丁版走自动合并，跨次版本留待维护者审批）。 |
 | `push-main.yml`（取代 `release-dev.yaml`） | `push` → `main`，`workflow_dispatch` | 调用 `ci.yml`；通过后调用 `docker-publish.yml` 推送 `:latest-dev`。（由于 `automerge.yml` 使用合并 App 令牌合入，自动合并后的提交也会自动触发本工作流更新 `:latest-dev`。） |
 | `docker-publish.yml`（取代原 `docker.yml`，可复用） | 仅 `workflow_call`（输入 `ref`、`tag`、`push_latest`、`disable_cache`） | 权限：`contents: read`、`packages: write`、`id-token: write`、`attestations: write`。仅用于可信发布（`push-main.yml` 与 `release.yml`）。发布版本 tag 前先检查 GHCR 中目标 tag 是否已存在：绝不覆盖已有版本 tag；若已存在，需核对与预期 `(tag, sha, digest)` 记录一致才跳过，不一致或无法核实时立即失败（相同 OCI `revision` 标签不足以单独证明内容一致）。仅在串行发布锁内再次核实 `tag` 仍为 `main` 上最高正式版本，且版本镜像与证明就绪后，才推进 `:latest` 并生成证明。取消原 `docker.yml` 可覆写旧 tag 的手动入口。 |
 | `release.yml`（改，可复用） | 推送 `v*.*.*` tag（手动发版）；`workflow_call`（输入 `tag`、`sha`、`skip_ci`） | **手动与定时发布共用同一串行写入锁**（`concurrency: { group: release-publish, cancel-in-progress: false }`）。显式解析目标 `tag`（`inputs.tag \|\| github.ref_name`）和对应提交 `sha`。手动推 tag 触发时先在该 `sha` 上调用 `ci.yml`。写入阶段使用 `tools/go.mod` 中的 GoReleaser v2，维护与 `(tag, sha)` 绑定的发布记录（含原始产物摘要/校验和）：仅对新流程创建且未完成的发布补齐缺失产物与证明，绝不覆盖已有 Release 资产或 GHCR 版本 tag；冲突即失败。全部版本产物及证明就绪后，在串行锁内再次核实 `tag` 为 `main` 上最高正式版本，最后才推进 `:latest`。发布构建禁用缓存。 |
@@ -186,7 +188,9 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
 | --- | --- |
 | `.github/CODEOWNERS` | **保留并重写为 `* @Shouyupedia`**（移除所有上游维护者账号，作为 `main-review` 规则集强制维护者本人审批的依据） |
 | `.go-version` | 新增，记录单一锁定的精确 Go 稳定版号，供所有工作流 `actions/setup-go` 读取并由 `go-toolchain-sync.yml` 自动维护 |
-| `goreleaser.yml` 与 `tools/go.mod` | 将 `goreleaser.yml` 从 `v0.155.0` 迁移至 GoReleaser v2 配置语法并验证产物契约一致；新建 `tools/go.mod` 统一管理 `goreleaser/v2`、`staticcheck`、`govulncheck` |
+| `goreleaser.yml` 与 `tools/go.mod` | 将 `goreleaser.yml` 从 `v0.155.0` 迁移至 GoReleaser v2 配置语法并验证产物契约一致；新建 `tools/go.mod` 统一管理 `goreleaser/v2`、`actionlint`、`staticcheck`、`govulncheck` |
+| `.gitattributes` | 新增最小范围行尾约束（仅 `*.sh`、`go.mod`、`go.sum`、`*.yml`、`Dockerfile*` 强制 `eol=lf`，避免 Windows CRLF 干扰 `go mod tidy -diff` 与 Linux shell 脚本） |
+| `.github/scripts/` | 新增自动合并核验、冷却期查询与 Go 工具链同步 Python 标准库脚本及离线单元测试（纳入 `CI / script-tests` 与敏感路径硬禁区） |
 | `oryxBuildBinary` | 删除（上游 #1754 误提交），并加入 `.gitignore` |
 | `scripts/codecov.sh` | 删除（包含 `bash <(curl -s https://codecov.io/bash)` 远程脚本执行，已废弃） |
 | `scripts/build-tplprev.sh` | 将 `misc/wasm/wasm_exec.js` 修正为 Go 1.24+ 路径 `lib/wasm/wasm_exec.js`，并增加 `set -euo pipefail` |
@@ -224,22 +228,30 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
   - `go mod verify`：通过（`all modules verified`）。
   - `go mod tidy -diff`：在默认 Windows `core.autocrlf=true`（CRLF）工作区下因 `go.sum` 行尾差异返回退出码 1；在 Windows 临时 LF 副本上复测返回退出码 0（Linux CI 实际表现待推送后在 GitHub Actions 上验证）。
 - **本机尚未验证**：`staticcheck`、`govulncheck`、GoReleaser v2、`actionlint`、`zizmor` 当前未安装在本机，待实现阶段通过 `tools/go.mod` 或本地工具运行验证（包括确认 `govulncheck` 当前依赖基线漏洞情况）。
-- **远端仓库现状（`gh api` 实测）**：
+- **远端仓库初始基线（2026-11-24 `gh api` 实测；其中 Dependabot 安全设置与 Rulesets 已于 2026-11-25 被 M1/M2 更新，见下方 PR 4 实测与 `d3484b7`）**：
   - 个人公开 fork（`owner_type: "User"`），默认分支 `main`，已有 release tag `v1.0.0`（2026-10-29，7 个资产）。
   - Actions 默认权限已为只读（`default_workflow_permissions: "read"`，`can_approve_pull_request_reviews: false`）。
-  - `allow_auto_merge: false`，`rulesets` 为空。
-  - `dependabot_security_updates` 与 `dependabot/alerts` 均为关闭。
-  - `has_issues: false`。
+  - 2026-11-24 基线：`allow_auto_merge: false`，`rulesets` 为空（2026-11-25 M2 已启用 `main-checks` 与 `main-review`，`allow_auto_merge` 保持 `false`）。
+  - 2026-11-24 基线：`dependabot_security_updates` 与 `dependabot/alerts` 均为关闭（2026-11-25 M1 已开启 `automated-security-fixes` 与 `vulnerability-alerts`）。
+  - `has_issues: false`（2026-11-25 M1 核实保持关闭）。
   - `CodeQL` 定时工作流已在每周运行（最近一次 2026-11-19）；这仅证明 `CodeQL` 已启用，新建的 `go-toolchain-sync.yml` 与 `scheduled-release.yml` 需在合入后单独确认处于启用状态。
 
 **实现阶段验证清单**
 
 - 根目录与 `/tools` 模块的 `go build ./...`、`go vet ./...`、`go test ./...`、`go mod verify`、`go mod tidy -diff`（LF 环境下）全部通过。
-- `go tool -modfile=tools/go.mod staticcheck ./...` 与 `go tool -modfile=tools/go.mod govulncheck ./...` 在本地运行通过。
+- `go tool -modfile=tools/go.mod staticcheck ./...`、`go tool -modfile=tools/go.mod actionlint` 与 `go tool -modfile=tools/go.mod goreleaser ...` 已验证可用；`govulncheck` 由 `scripts/run-govulncheck.sh` 按 `.go-version` 以 `go build -modfile=tools/go.mod` 构建一次扫描器后遍历发布目标运行。
 - `go tool -modfile=tools/go.mod goreleaser check` 与 `go tool -modfile=tools/go.mod goreleaser release --snapshot --clean` 在本地运行通过，且核对生成的归档文件名（含 `armhf`、`arm64v8`、Windows `.zip`）、归档内 `LICENSE.md`、`checksums.txt` 及二进制 `-v` 版本输出与现有 `v1.0.0` 发布契约一致。
 - `pip install --require-hashes -r docs-requirements.txt`、`scripts/build-tplprev.sh` 与 `mkdocs build --strict` 本地构建通过。
-- 所有工作流通过 `actionlint` 和 `zizmor`；`dependabot.yml` 通过 JSON Schema 校验。
+- 所有工作流通过 `actionlint` 和 `zizmor`；`dependabot.yml` 通过 JSON Schema 校验；`scripts/` 与 `.github/scripts/` 的 Python 单元测试全部通过。
 - 所有 `uses:` 的 SHA 用 `git ls-remote` 与版本 tag 逐一核对。
+
+**PR 4 实测结论与校准边界（2026-11-25）**
+
+- **Ruleset 与合并方式（M2，`d3484b7`）**：`main-checks`（ID `28051307`，`active`，零豁免）将 `allowed_merge_methods` 限定为 `["merge"]`，`main-review`（ID `28051631`，`active`）将 `watchtower-automerge`（Integration `5915895`）与 `Repository admin` 列为 `pull_request` 绕过项。`automerge.yml` 相应使用单次 `sha` 保护的 `PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge`（`merge_method=merge`），保持 HTTP 405/409 非重试正常退出语义不变。
+- **Go 冷却期索引实测（4.2）**：`cooldown.go_first_seen` 在 10 次请求预算内（1 次 `proxy.golang.org` `.info` 提示 + 最多 9 页 `index.golang.org/index`、每页 2000 条）实测约命中 6/12 个 Go 模块样本，且 `golang.org/toolchain` 样本未命中。按 fail-closed 原则，凡在预算内未命中的版本会使对应依赖更新 PR 留在人工审核，并阻止该次 `go-toolchain-sync.yml` 创建/更新工具链同步 PR（亦使 `automerge.yml` 对该版本返回 `eligible=false`）。
+- **Dependabot 正常/安全更新校准（4.1a）**：仓库尚无真实 Dependabot 普通更新 + 安全更新成对样本，`.github/scripts/fixtures/` 中的 Dependabot 与工具链夹具均为手工合成夹具（仅 `human_pr13_replay.json` 为脱敏后的真实人工 PR #13 离线回放样本）；`CALIBRATED_NORMAL_UPDATE_SIGNALS` 有意保持为空，所有 Dependabot PR 当前全部转人工审核，待 M3 取得真实成对样本后再校准启用。
+- **PyPI 与 Docker 冷却期**：PyPI 核验覆盖锁文件中该包该版本所有允许的 `--hash=sha256:...` 并取最晚 `upload_time_iso_8601`（任一缺失即 fail-closed）；Docker 核验对缺失 `tag_last_pushed` 或 digest 不匹配一律 fail-closed。
+- **相对初版设计的 0.1 实施偏离**：`go tool -modfile=tools/go.mod` 用于 `staticcheck`/`goreleaser`/`actionlint`，`govulncheck` 改由 `scripts/run-govulncheck.sh` 经 `go build -modfile=tools/go.mod` 扫描各目标；新增最小范围 `.gitattributes`；`tools/go.mod` 增补 `actionlint`；校验与同步逻辑落地在 `.github/scripts/`（Python 标准库 + 单元测试）并将 `.github/scripts/**` 列入敏感路径硬禁区。
 
 ## 8. 需要维护者在 GitHub 上手动完成的设置
 

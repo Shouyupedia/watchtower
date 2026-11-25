@@ -14,17 +14,17 @@
 - 现状下仓库没有 Ruleset，PR 1–3 可以直接由管理员合并；PR 4、4b、5 合并时已受 Ruleset 约束，使用方法 B 的管理员 `For pull requests only` 绕过审批（检查必须全绿，零豁免）。
 - 每个 PR 用 `claude/*` 或 `chore/auto-maint-N-*` 分支，PR 描述附验证输出。**所有提交与推送由维护者确认后再做**，本计划不自动提交。
 
-| 阶段 | 内容 | 依赖 | 谁做 |
-| --- | --- | --- | --- |
-| PR 1 | 上游残留清理、脚本与文档修复 | 无 | 实现者 |
-| PR 2 | `.go-version`、`tools/go.mod`、GoReleaser v2 配置**与旧 `release.yml` 的调用同 PR 原子切换**、Docker digest、文档依赖锁定 | PR 1 | 实现者 |
-| PR 3 | 只读 CI 体系、可信镜像发布基础、Dependabot、CodeQL/文档工作流 | PR 2 | 实现者 |
-| M1 | 建 2 个 GitHub App、2 个 Environment、安全设置 | 可与 PR 1–3 并行 | 维护者 |
-| M2 | 创建 `main-checks`、`main-review` Ruleset | PR 3 合入并跑过 | 维护者 |
-| PR 4 | `automerge.yml`、`go-toolchain-sync.yml` 及其校验脚本 | M1、M2 | 实现者 |
-| PR 4b | macOS 发布目标（`darwin/amd64`、`darwin/arm64`），发布契约 6 → 8 个归档 | PR 4 | 实现者 |
-| PR 5 | `release.yml`、`scheduled-release.yml`、证明与 SBOM | PR 4b | 实现者 |
-| M3 | 端到端验收 | 全部 | 维护者 + 实现者 |
+| 阶段 | 内容 | 依赖 | 谁做 | 状态 |
+| --- | --- | --- | --- | --- |
+| PR 1 | 上游残留清理、脚本与文档修复 | 无 | 实现者 | 已合并（#10） |
+| PR 2 | `.go-version`、`tools/go.mod`、GoReleaser v2 配置**与旧 `release.yml` 的调用同 PR 原子切换**、Docker digest、文档依赖锁定 | PR 1 | 实现者 | 已合并（#11） |
+| PR 3 | 只读 CI 体系、可信镜像发布基础、Dependabot、CodeQL/文档工作流 | PR 2 | 实现者 | 已合并（#12） |
+| M1 | 建 2 个 GitHub App、2 个 Environment、安全设置 | 可与 PR 1–3 并行 | 维护者 | 已完成（2026-11-25） |
+| M2 | 创建 `main-checks`、`main-review` Ruleset | PR 3 合入并跑过 | 维护者 | 已完成（2026-11-25） |
+| PR 4 | `automerge.yml`、`go-toolchain-sync.yml` 及其校验脚本 | M1、M2 | 实现者 | 待推进 |
+| PR 4b | macOS 发布目标（`darwin/amd64`、`darwin/arm64`），发布契约 6 → 8 个归档 | PR 4 | 实现者 | 待推进 |
+| PR 5 | `release.yml`、`scheduled-release.yml`、证明与 SBOM | PR 4b | 实现者 | 待推进 |
+| M3 | 端到端验收 | 全部 | 维护者 + 实现者 | 待推进 |
 
 ## 0.1 开始前需要你决定的 4 件事（有默认值，不回复则按默认）
 
@@ -168,25 +168,32 @@ git ls-remote ... # 每个 uses SHA 与版本 tag 逐一核对（可写成 scrip
 
 ## M1：GitHub 手动配置（维护者，可与 PR 1–3 并行）
 
-按设计稿 §8 第 1、2、4、6 项执行，这里给出可勾选清单：
+**状态**：已完成（2026-11-25）。按设计稿 §8 第 1、2、4、6 项执行：
 
-- [ ] 创建 `watchtower-updater`、`watchtower-automerge` 两个私有 App（仅 `Contents` 与 `Pull requests` 读写，关闭 Webhook，Only on this account），分别生成私钥并**只安装到本仓库**。
-- [ ] 创建 Environment `updater`、`automerge`，Deployment branches 限定为 `main`；写入 `UPDATER_APP_ID`、`UPDATER_APP_PRIVATE_KEY`、`AUTOMERGE_APP_ID`、`AUTOMERGE_APP_PRIVATE_KEY`。
-- [ ] 打开 Dependency graph、Dependabot alerts、Dependabot security updates、Private vulnerability reporting。**提醒**：Dependabot security updates 开启后它的 PR 也会出现，PR 4 之前它们只会等待人工审核，符合预期。
-- [ ] 决定是否启用 Issues（影响 PR 1.6 的模板是否有意义）。
-- [ ] 私钥只保存在 Environment secrets，不要落地到本机文件或交给任何工具。
+- [x] 创建 `watchtower-updater`、`watchtower-automerge` 两个私有 App（仅 `Contents` 与 `Pull requests` 读写，关闭 Webhook，Only on this account），分别生成私钥并**只安装到本仓库**。
+  - **2026-11-25 核实**：`watchtower-automerge`（Integration `5915895`）已通过 `main-review` Ruleset 确认安装到本仓库；`watchtower-updater` 安装范围与两 App 的权限/Webhook 无法用当前 OAuth token 调 `/user/installations` 查询（HTTP 403），由维护者在网页端确认。
+- [x] 创建 Environment `updater`、`automerge`，Deployment branches 限定为 `main`；写入 `UPDATER_APP_ID`、`UPDATER_APP_PRIVATE_KEY`、`AUTOMERGE_APP_ID`、`AUTOMERGE_APP_PRIVATE_KEY`。
+  - **2026-11-25 核实**：`gh api` 确认两个 Environment 均为自定义分支策略且仅允许 `main`，四个 Environment secrets 均已配置。
+- [x] 打开 Dependency graph、Dependabot alerts、Dependabot security updates、Private vulnerability reporting。**提醒**：Dependabot security updates 开启后它的 PR 也会出现，PR 4 之前它们只会等待人工审核，符合预期。
+  - **2026-11-25 核实**：`gh api` 确认 Private vulnerability reporting（`enabled: true`）、漏洞告警（`vulnerability-alerts` 返回 `204`）、Dependabot 安全更新（`automated-security-fixes` 返回 `enabled: true, paused: false`）均已开启；fork 上的 Dependabot version updates 需在网页端 `Insights → Dependency graph → Dependabot` 及 M3 确认。
+- [x] 决定是否启用 Issues（影响 PR 1.6 的模板是否有意义）。
+  - **2026-11-25 核实**：`gh api` 确认当前保持关闭（`has_issues: false`）。
+- [x] 私钥只保存在 Environment secrets，不要落地到本机文件或交给任何工具（本机 `.pem` 清理与凭据管控由维护者确认）。
 
 ## M2：Ruleset（维护者，PR 3 合入、检查名确定后）
 
-- [ ] 用 PR 3 记录的真实 check 名创建两个 Ruleset（Enforcement = Active，目标分支 `main`）：
-  - **`main-checks`（Bypass 为空）**：必须经 PR（`Required approvals = 0`）；Block force pushes；Restrict deletions；**Require status checks to pass**：`ci.yml` 的 10 个任务（lint、test×3 平台、mod-check、version-consistency、vuln、script-tests、goreleaser-snapshot、docker-build、docs-build、workflow-lint，名称以实际记录为准）+ `dependency-review` + `CodeQL`；**Require branches to be up to date before merging**。
-  - **`main-review`**：`Required approvals = 1`；**Require review from Code Owners**；Dismiss stale approvals on new commits；Require approval of the most recent reviewable push；**Bypass 仅两项，均 `For pull requests only`**：`watchtower-automerge`（App）与 `Repository admin`（Role）。
-- [ ] 把 App 加入 Bypass 前，先用 `gh api repos/{owner}/{repo}/rulesets` 确认 App 已安装（否则列表里选不到）。
-- [ ] 核实生效：`gh api repos/{owner}/{repo}/rules/branches/main`。
-- [ ] 干跑验证两条规则（用一个一次性的测试 PR，**不合并**）：
-  - 检查未全绿时，"Merge"按钮应被 `main-checks` 阻止，管理员也无法绕过；
-  - 全绿但未审批时，被 `main-review` 阻止，管理员可选择绕过合并。
-- [ ] 把 `allow_auto_merge` 保持 `false`（设计使用 REST 合并，不依赖原生 auto-merge）。
+**状态**：已完成（2026-11-25）。
+
+- [x] 用 PR 3 记录的真实 check 名创建两个 Ruleset（Enforcement = Active，目标分支 `main`）：
+  - **`main-checks`（ID `28051307`，`active`，Bypass 为空 `[]`）**：规则含 `deletion`、`non_fast_forward`、`pull_request`（`required_approving_review_count: 0`，`allowed_merge_methods: ["merge"]`）、`required_status_checks`（`strict_required_status_checks_policy: true`，`do_not_enforce_on_create: false`）、`code_scanning`（`CodeQL`，`alerts_threshold: errors`，`security_alerts_threshold: high_or_higher`）。14 项必需检查（来源均为 GitHub Actions，`integration_id: 15368`）：`CI / lint`、`CI / test (ubuntu-latest)`、`CI / test (windows-latest)`、`CI / test (macos-latest)`、`CI / mod-check`、`CI / version-consistency`、`CI / vuln`、`CI / script-tests`、`CI / goreleaser-snapshot`、`CI / docker-build`、`CI / docs-build`、`CI / workflow-lint`、`dependency-review`、`Analyze (go)`。
+  - **`main-review`（ID `28051631`，`active`）**：`required_approving_review_count: 1`、`require_code_owner_review: true`、`dismiss_stale_reviews_on_push: true`、`require_last_push_approval: true`；Bypass 仅两项且均为 `pull_request` 模式：`RepositoryRole` `5`（Repository admin）与 `Integration` `5915895`（`watchtower-automerge`）。
+  - **PR 4 注意**：`main-checks` 当前将 `allowed_merge_methods` 限定为 `["merge"]`，实现 PR 4.3 的 REST 合并调用时须使用 `merge_method=merge`（或按需调整 Ruleset 允许的合并方式）。
+- [x] 把 App 加入 Bypass 前，确认 App 已安装：`watchtower-automerge`（Integration `5915895`）已成功加入 `main-review` 的 `bypass_actors`。
+- [x] 核实生效：2026-11-25 `gh api repos/{owner}/{repo}/rules/branches/main` 确认两条 Ruleset 全部规则生效。
+- [x] 干跑验证两条规则（测试 PR #13，分支 `chore/ruleset-dry-run`，**不合并**）：
+  - 15 项检查全绿（14 项必需检查 + `CodeQL`，含 `CI / test (macos-latest)`）；检查运行期间与全绿后 API 均返回 `mergeStateStatus: BLOCKED`、`reviewDecision: REVIEW_REQUIRED`。
+  - PR #13 已关闭（不合并），远端/本地测试分支与临时 worktree 均已删除。
+- [x] 把 `allow_auto_merge` 保持 `false`（2026-11-25 `gh api` 实测确认 `false`）。
 
 ---
 
@@ -211,21 +218,24 @@ git ls-remote ... # 每个 uses SHA 与版本 tag 逐一核对（可写成 scrip
   - 找出只读任务**可靠**的区分信号（分支名、PR 正文固定段落、标签、提交元数据、Dependabot alerts API 是否对只读令牌可用等），并为每一类信号写正反用例。
   - **证据不足的处理**：只要无法确定一个 PR 不是安全更新（信号缺失、结构异常、API 不可读），一律 `eligible=false` 转人工；宁可让普通更新多走一次人工审核，也不能让安全更新自动合并。
   - 通过标准：真实普通更新样本 → 判定为普通；真实安全更新样本 → `eligible=false`；缺字段样本 → `eligible=false`。
+  - **PR 4 实测与校准边界（2026-11-25）**：仓库尚未产生真实 Dependabot 普通更新与安全更新成对样本，`.github/scripts/fixtures/` 中的 Dependabot 与工具链夹具均为手工合成夹具（仅 `human_pr13_replay.json` 为脱敏后的真实人工 PR #13 离线回放样本）；因此 `automerge_verify.py` 的 `CALIBRATED_NORMAL_UPDATE_SIGNALS` 保持有意为空（`frozenset()`），所有 Dependabot PR 均 fail-closed（`eligible=false`）转人工审核，待 M3 采集真实成对样本校准后再启用正向信号。
 - [ ] **4.2 实现冷却期查询**：
   - Go 模块：读 `https://index.golang.org/index?since=...` 查询模块版本首次入库 `Timestamp`；先**实测索引接口分页与按模块过滤能力**（它按时间排序、不支持按模块查询，需要评估扫描成本）。若无法在合理请求数内定位，则 fail-closed（`eligible=false`），并在 PR 描述中说明 Go 模块自动合并因此退化为人工审核，由你决定是否接受或另寻可信来源。**这是整个计划里最大的不确定点，先 spike 再继续。**
-  - Docker：Docker Hub `https://hub.docker.com/v2/repositories/library/golang/tags/<tag>` 的 `tag_last_pushed`，并核对 digest 与 PR 中一致。
-  - PyPI：`https://pypi.org/pypi/<pkg>/<version>/json` 的 `upload_time_iso_8601`（取最早的文件）。
+    - **4.2 实测结论（2026-11-25）**：`cooldown.go_first_seen` 仅将 `proxy.golang.org` 的 `.info` `Time` 作为前向扫描起点提示（`since = Time - 60s`），不将其当作可信发布时间；请求预算固定为 10 次（1 次 `.info` + 最多 9 页 `index.golang.org/index`，每页上限 2000 条）。实测样本中约 6/12 个 Go 模块命中，`golang.org/toolchain` 未在 10 次请求预算内命中。按 fail-closed 原则：未命中的 Go 模块升级 PR 判定 `eligible=false` 转人工审核；`go_toolchain_sync.py` 未命中时拒绝创建/更新工具链 PR（`needs_sync=False`），`automerge_verify.py` 亦判定 `eligible=false`（均未实现“首次观察起算”回退）。
+  - Docker：Docker Hub `https://hub.docker.com/v2/repositories/library/golang/tags/<tag>` 的 `tag_last_pushed`，并核对 digest 与 PR 中一致（缺失或不匹配时 fail-closed）。
+  - PyPI：`https://pypi.org/pypi/<pkg>/<version>/json` 的 `upload_time_iso_8601`（覆盖锁文件中该包该版本允许的每一个 `--hash`，取对应文件的**最晚**上传时间；任一 hash 缺失或无时间戳即 fail-closed，与 4.1 保持一致）。
 - [ ] **4.3 `automerge.yml`**：
   - 触发：`workflow_run`（`["Pull Request","CodeQL"]`，`completed`）；顶层 `permissions: {}`；`concurrency` 按目标 PR 分组。
   - `verify`：`contents: read`、`pull-requests: read`、`checks: read`、`actions: read`；`actions/checkout` 显式 `ref: ${{ github.event.repository.default_branch }}` 检出 `main` 取脚本，**不检出 PR 代码、不下载 artifact**；`GITHUB_TOKEN` 只读；输出 `eligible`、`pr_number`、`head_sha`。
-  - `merge`：`needs: verify`，`if: needs.verify.outputs.eligible == 'true'`，`environment: automerge`；`actions/create-github-app-token`（钉 SHA）签发令牌；`gh api -X PUT repos/{owner}/{repo}/pulls/<n>/merge -f sha=<head_sha> -f merge_method=squash`（merge_method 与仓库既有策略一致，先 `gh api repos/{owner}/{repo}` 看允许哪些）；**不调用 `update-branch`**；HTTP 405/409 视为正常结束，不重试。
+  - `merge`：`needs: verify`，`if: needs.verify.outputs.eligible == 'true'`，`environment: automerge`；`actions/create-github-app-token`（钉 SHA）签发令牌；`gh api -X PUT repos/{owner}/{repo}/pulls/<n>/merge -f sha=<head_sha> -f merge_method=merge`（对齐 M2 已生效的 `main-checks` Ruleset，见 `d3484b7`：`allowed_merge_methods: ["merge"]`）；单次带 `sha` 保护请求，**不调用 `update-branch`**；HTTP 405/409 视为正常结束，不重试。
   - 所有从事件载荷取的值经环境变量传递，**不直接内插进 `run:`**（zizmor 会检查）。
 - [ ] **4.4 `.github/scripts/go_toolchain_sync.py` + 测试**：
   - 检查：`go.dev/dl/?mode=json` 最新稳定版、Docker Hub digest 与 `tag_last_pushed`、可信首次可见时间，均满 7 天才采用；已一致且无落后同步分支则退出。
   - 同次版本补丁：只改 `.go-version` 与 `dockerfiles/Dockerfile*`；跨次版本：额外改 `go.mod`、`tools/go.mod` 的 `go` 指令并跑 `go mod tidy`。
   - 提交：GraphQL `createCommitOnBranch`（`expectedHeadOid` 防并发），分支名固定 `automation/go-toolchain`，单提交；已有同名开放 PR 则更新该分支。`push → main` 触发时仅在该分支落后时重放。
 - [ ] **4.5 `go-toolchain-sync.yml`**：每周一 02:17 UTC + `push` → `main` + `workflow_dispatch`；检查任务只读；提 PR 任务绑定 `environment: updater`，用 `watchtower-updater` 令牌。
-- [ ] **4.6 同步修订设计稿**：把 4.2 的实测结论与 0.1 的偏离写回设计稿（状态改为"已批准"由你决定）。
+- [x] **4.6 同步修订设计稿**：把 4.2 的实测结论与 0.1 的偏离写回设计稿（状态改为"已批准"由你决定）。
+  - **2026-11-25 已同步至 `docs/superpowers/specs/2026-11-17-auto-maintenance-design.md`**：记录 M2 活跃 Ruleset 仅允许 `merge_method=merge`（单次 `sha` 保护请求、HTTP 405/409 不重试）、4.2 `index.golang.org` 10 次请求实测（~6/12 命中与 `golang.org/toolchain` 未命中导致依赖 PR 转人工且阻止工具链同步开 PR）、4.1a 合成夹具与空校准集使全部 Dependabot PR 暂转人工、PyPI 取全部允许 hash 最晚上传时间、Docker 独立核验 fail-closed，以及 0.1 各项偏离（`go tool`/`go build` 实测结果、最小 `.gitattributes`、`tools/go.mod` 增补 `actionlint`、`.github/scripts/` 与 `.github/scripts/**` 敏感路径硬禁区）。设计稿状态字段保持“已修订，待批准”交维护者决定。
 
 **PR 4 验收**
 
@@ -317,7 +327,7 @@ python -I -m unittest discover -s .github/scripts -v
 
 | 风险 | 缓解 / 回滚 |
 | --- | --- |
-| Go 模块"首次公开可见时间"没有可行的可信来源（4.2） | fail-closed 退化为人工审核；其余生态不受影响；由你决定是否接受 |
+| Go 模块"首次公开可见时间"没有可行的可信来源（4.2） | 实测 `index.golang.org` 在 10 次请求预算下约命中 6/12 个 Go 模块且未命中 `golang.org/toolchain`；fail-closed 使未命中的依赖 PR 退化为人工审核、并阻止 `go-toolchain-sync.yml` 创建工具链 PR；其余生态不受影响；由你决定是否接受或另寻可信来源 |
 | 必需检查名变动导致 PR 永远等不到检查 | 检查名在 M2 之后冻结；变更需同时改 Ruleset，属维护者操作 |
 | `automerge.yml` 逻辑错误导致误合并 | PR 4 的拒绝用例全覆盖 + 离线回放；`main-checks` 零豁免兜底；紧急时在 `automerge` Environment 删除 App 私钥即停用 |
 | 发布了错误的 `:latest` | 彩排；`:latest` 只在串行锁内、产物齐全后推进；`v1.0.0` 与已发版本不会被覆盖，可用同一流程发下一补丁修复 |
