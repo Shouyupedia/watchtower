@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Verify that a GoReleaser snapshot in dist/ matches the v1.0.0 release contract.
+# Verify that a GoReleaser snapshot in dist/ matches the release contract:
+# the six archives shipped in v1.0.0 plus the two macOS archives added in
+# PR 4b (8 archives, 9 release files including the checksums file).
 #
-# Contract (see docs/superpowers/plans/2026-11-24-auto-maintenance-plan.md, 2.5):
-#   * exactly 6 archives, no extras (in particular no windows_arm64):
+# Contract (see docs/superpowers/plans/2026-11-24-auto-maintenance-plan.md,
+# 2.5 and 4b.2):
+#   * exactly 8 archives, no extras (in particular no windows_arm64):
 #       watchtower_linux_{386,amd64,arm64v8,armhf}.tar.gz
 #       watchtower_windows_{386,amd64}.zip
+#       watchtower_darwin_{amd64,arm64}.tar.gz
 #   * exactly one checksums file, watchtower_<version>_checksums.txt, with one
 #     line per archive in "<sha256>  <file>" form, verifiable with sha256sum -c
 #   * nothing else at the top level of dist/ except GoReleaser's own build
@@ -54,6 +58,8 @@ archives=(
   watchtower_linux_armhf.tar.gz
   watchtower_windows_386.zip
   watchtower_windows_amd64.zip
+  watchtower_darwin_amd64.tar.gz
+  watchtower_darwin_arm64.tar.gz
 )
 
 # Build metadata that GoReleaser always writes next to the archives.
@@ -72,12 +78,14 @@ target_dirs=(
   watchtower_linux_arm64_v8.0
   watchtower_windows_386_sse2
   watchtower_windows_amd64_v1
+  watchtower_darwin_amd64_v1
+  watchtower_darwin_arm64_v8.0
 )
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# 1. Exactly the six archives.
+# 1. Exactly the eight archives.
 for name in "${archives[@]}"; do
   [ -f "$dist/$name" ] || fail "missing archive $name"
 done
@@ -104,10 +112,10 @@ fi
 echo "check-release-contract: checksums file: $checksums (version $version)"
 
 # 3. Nothing else may look like a release artifact. Reject every regular file
-#    anywhere under dist/ that is not one of the six archives or the checksums
+#    anywhere under dist/ that is not one of the eight archives or the checksums
 #    file; this catches extra archives in any format (.tar.xz, .tgz, ...) that
 #    an allowlist of extensions would miss. The per-target build directories
-#    must be exactly the six expected ones.
+#    must be exactly the eight expected ones.
 find "$dist" -type f -printf '%P\n' | sort > "$tmp/all-files.txt"
 {
   printf '%s\n' "${archives[@]}"
@@ -124,7 +132,7 @@ awk 'NR == FNR { allowed[$0] = 1; next } !($0 in allowed)' \
   "$tmp/expected-artifacts.txt" "$tmp/all-files.txt" > "$tmp/unexpected-files.txt"
 if [ -s "$tmp/unexpected-files.txt" ]; then
   cat "$tmp/unexpected-files.txt" >&2
-  fail "dist/ contains files outside the release contract (archives must be exactly the six listed)"
+  fail "dist/ contains files outside the release contract (archives must be exactly the eight listed)"
 fi
 find "$dist" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort > "$tmp/actual-dirs.txt"
 printf '%s\n' "${target_dirs[@]}" | sort > "$tmp/expected-dirs.txt"
@@ -133,7 +141,7 @@ if ! diff -u "$tmp/expected-dirs.txt" "$tmp/actual-dirs.txt" > "$tmp/dirs.diff";
   fail "dist/ contains unexpected directories"
 fi
 
-# 4. The checksums file lists exactly the six archives, one well-formed line each.
+# 4. The checksums file lists exactly the eight archives, one well-formed line each.
 line_count="$(wc -l < "$dist/$checksums" | tr -d '[:space:]')"
 [ "$line_count" -eq "${#archives[@]}" ] || fail "$checksums has $line_count lines, expected ${#archives[@]}"
 for name in "${archives[@]}"; do
@@ -158,6 +166,8 @@ declare -A archive_target_dir=(
   [watchtower_linux_armhf.tar.gz]=watchtower_linux_arm_6
   [watchtower_windows_386.zip]=watchtower_windows_386_sse2
   [watchtower_windows_amd64.zip]=watchtower_windows_amd64_v1
+  [watchtower_darwin_amd64.tar.gz]=watchtower_darwin_amd64_v1
+  [watchtower_darwin_arm64.tar.gz]=watchtower_darwin_arm64_v8.0
 )
 
 for name in "${archives[@]}"; do

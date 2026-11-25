@@ -125,7 +125,7 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
    - 所有工作流的 `uses:` 钉到完整 commit SHA 并附版本注释，由 Dependabot 维护（人工审核合并）。
    - **新增 `.go-version` 作为精确 Go 补丁版本的唯一来源**：所有工作流中的 `actions/setup-go` 统一使用 `go-version-file: .go-version`（不再写浮动的 `1.26.x`，也无需在升级 Go 时改动 `.github/workflows/**`）。`go.mod` 与 `tools/go.mod` 的 `go` 指令代表模块要求的**最低 Go 语言版本**，日常补丁升级保持不变，仅在跨次版本升级 PR 中由 `go-toolchain-sync.yml` 同步调整并交维护者审核。
    - 三个 Dockerfile 的 `golang:<ver>-alpine` 全部钉 `@sha256:` digest。
-   - **迁移 `goreleaser.yml` 至 GoReleaser v2 并纳入 `tools/go.mod`**：本次将 `goreleaser.yml` 升级为 v2 配置语法，并用 snapshot 构建严格核对输出平台（`linux`/`windows` × `amd64`/`386`/`arm`/`arm64`，排除 `windows/arm`）、归档格式与架构别名（`armhf`、`arm64v8`、Windows `.zip`、附带 `LICENSE.md`）、`ldflags` 版本号注入以及 `checksums.txt` 与现有 `v1.0.0` 发布资产契约一致。随后将 `github.com/goreleaser/goreleaser/v2`、`github.com/rhysd/actionlint/cmd/actionlint`、`staticcheck`、`govulncheck` 全部作为 `tool` 依赖写入独立模块 `tools/go.mod`，由 `tools/go.sum` 和 Go checksum database 校验并由 Dependabot 自动升级（移除写死 `v0.155.0` 的 `goreleaser/goreleaser-action`）。
+   - **迁移 `goreleaser.yml` 至 GoReleaser v2 并纳入 `tools/go.mod`**：本次将 `goreleaser.yml` 升级为 v2 配置语法，并用 snapshot 构建严格核对输出平台（共 8 个归档：`linux` 的 `amd64`/`386`/`arm`(v6)/`arm64`、`windows` 的 `amd64`/`386`、`darwin` 的 `amd64`/`arm64`；排除 `windows/arm` 与 `windows/arm64`）、归档格式与架构别名（`armhf`、仅 Linux 使用的 `arm64v8`、Windows `.zip`、macOS `.tar.gz`、附带 `LICENSE.md`）、`ldflags` 版本号注入，以及发布资产契约（`v1.0.0` 的 6 个归档名不变，另加 2 个 `darwin` 归档）一致。随后将 `github.com/goreleaser/goreleaser/v2`、`github.com/rhysd/actionlint/cmd/actionlint`、`staticcheck`、`govulncheck` 全部作为 `tool` 依赖写入独立模块 `tools/go.mod`，由 `tools/go.sum` 和 Go checksum database 校验并由 Dependabot 自动升级（移除写死 `v0.155.0` 的 `goreleaser/goreleaser-action`）。
    - `docs-requirements.txt` 锁定全部直接与传递依赖的精确版本和 `--hash=sha256:...`（启用 `pip install --require-hashes`），文档工作流的 Python 版本钉死。
 5. **合并前检查（零豁免硬闸门 `main-checks`）。** 所有合入 `main` 的 PR 都必须通过下列必需检查：
    - `staticcheck`（lint，通过 `go tool -modfile=tools/go.mod staticcheck ./...` 运行）
@@ -240,7 +240,8 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
 
 - 根目录与 `/tools` 模块的 `go build ./...`、`go vet ./...`、`go test ./...`、`go mod verify`、`go mod tidy -diff`（LF 环境下）全部通过。
 - `go tool -modfile=tools/go.mod staticcheck ./...`、`go tool -modfile=tools/go.mod actionlint` 与 `go tool -modfile=tools/go.mod goreleaser ...` 已验证可用；`govulncheck` 由 `scripts/run-govulncheck.sh` 按 `.go-version` 以 `go build -modfile=tools/go.mod` 构建一次扫描器后遍历发布目标运行。
-- `go tool -modfile=tools/go.mod goreleaser check` 与 `go tool -modfile=tools/go.mod goreleaser release --snapshot --clean` 在本地运行通过，且核对生成的归档文件名（含 `armhf`、`arm64v8`、Windows `.zip`）、归档内 `LICENSE.md`、`checksums.txt` 及二进制 `-v` 版本输出与现有 `v1.0.0` 发布契约一致。
+- `go tool -modfile=tools/go.mod goreleaser check` 与 `go tool -modfile=tools/go.mod goreleaser release --snapshot --clean` 在本地运行通过，且核对生成的 8 个归档文件名（含 `armhf`、仅 Linux 使用的 `arm64v8`、Windows `.zip`、`darwin_amd64`/`darwin_arm64`）、归档内 `LICENSE.md`、`checksums.txt`（8 行）及二进制内嵌版本字符串与发布契约一致：`v1.0.0` 的 6 个归档名不变，只新增 2 个 `darwin` 归档。
+- macOS 发布目标在 `test (macos-latest)` 中按发布参数（`CGO_ENABLED=0` 与相同 `ldflags`）构建 `darwin/arm64` 与 `darwin/amd64`，用 `file` 核对架构、用 `codesign -v` 核对 `arm64` 的 ad-hoc 签名，并运行本机架构二进制的 `--help`（不连接 Docker）。
 - `pip install --require-hashes -r docs-requirements.txt`、`scripts/build-tplprev.sh` 与 `mkdocs build --strict` 本地构建通过。
 - 所有工作流通过 `actionlint` 和 `zizmor`；`dependabot.yml` 通过 JSON Schema 校验；`scripts/` 与 `.github/scripts/` 的 Python 单元测试全部通过。
 - 所有 `uses:` 的 SHA 用 `git ls-remote` 与版本 tag 逐一核对。

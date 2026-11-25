@@ -16,3 +16,7 @@ docker run -d \
   --interval 300 \
   --label-enable
 ```
+
+## macOS binaries
+
+Release archives for running watchtower directly on macOS (`watchtower_darwin_arm64.tar.gz` and `watchtower_darwin_amd64.tar.gz`) are included starting with [GitHub releases](https://github.com/shouyupedia/watchtower/releases) published after `v1.0.0`. See [macOS binaries](docs/usage-overview.md#macos-binaries) for verification and first-run instructions.

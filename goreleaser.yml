@@ -7,8 +7,9 @@ builds:
     binary: watchtower
     env:
       - CGO_ENABLED=0
-    # Exactly the six targets shipped in v1.0.0. The matrix form
-    # (goos x goarch) would add windows/arm64, which v1.0.0 does not have.
+    # Exactly the eight release targets: the six archives shipped in v1.0.0
+    # plus darwin/amd64 and darwin/arm64. The matrix form (goos x goarch)
+    # would add windows/arm64, which is deliberately not shipped.
     targets:
       - linux_amd64
       - linux_386
@@ -16,12 +17,16 @@ builds:
       - linux_arm64
       - windows_amd64
       - windows_386
+      - darwin_amd64
+      - darwin_arm64
     ldflags:
       - -s -w -X github.com/containrrr/watchtower/internal/meta.Version={{.Version}}
 
 archives:
+  # The arm64v8 alias is Linux-only (the Docker image architecture name);
+  # macOS arm64 archives keep the plain arm64 suffix.
   - name_template: >-
-      {{ .ProjectName }}_{{ .Os }}_{{ if eq .Arch "arm" }}armhf{{ else if eq .Arch "arm64" }}arm64v8{{ else }}{{ .Arch }}{{ end }}
+      {{ .ProjectName }}_{{ .Os }}_{{ if eq .Arch "arm" }}armhf{{ else if and (eq .Os "linux") (eq .Arch "arm64") }}arm64v8{{ else }}{{ .Arch }}{{ end }}
     formats:
       - tar.gz
     format_overrides:

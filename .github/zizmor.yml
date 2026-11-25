@@ -42,7 +42,7 @@ rules:
     # actionlint v1.7.12 rejects the newer "$/..." syntax and requires "./..."
     # for local composite actions and reusable workflows.
     ignore:
-      - ci.yml:181
+      - ci.yml:241
       - docker-publish.yml:88
       - docker.yml:48
       - pull-request.yml:17
