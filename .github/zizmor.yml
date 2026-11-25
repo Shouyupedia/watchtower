@@ -15,6 +15,14 @@ rules:
     ignore:
       - release.yml # TEMPORARY until PR 5: setup-go caching is enabled
 
+  dangerous-triggers:
+    # Design spec §5.2 deliberately uses workflow_run: the verifier must run
+    # from main, never checks out or executes PR code, and never downloads PR
+    # artifacts. The write credential lives only in the environment-gated merge
+    # job, after the read-only verify job has passed.
+    ignore:
+      - automerge.yml:14
+
   excessive-permissions:
     ignore:
       - release.yml # TEMPORARY until PR 5: no top-level/lint/test permissions

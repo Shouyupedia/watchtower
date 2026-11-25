@@ -1,0 +1,72 @@
+{
+  "provenance": {
+    "source": "Public GitHub REST API responses for PR #13 (chore/ruleset-dry-run), captured read-only on 2026-11-25",
+    "observed_facts": {
+      "pr_number": 13,
+      "pr_state": "closed",
+      "pr_draft": false,
+      "pr_commits_from_detail_endpoint": 1,
+      "pulls_list_open_count": 0,
+      "pulls_list_omits_commits_field": true,
+      "base_ref": "main",
+      "base_sha": "48191657b1be0b3c30413e68a44a2e31c16423b6",
+      "head_ref": "chore/ruleset-dry-run",
+      "head_sha": "de3c6ad554fd6862008ed03a9c8f5f56c52b2f9d",
+      "same_repository": true,
+      "author_type": "User",
+      "workflow_run_id": 45560323262
+    },
+    "sanitized_fields": {
+      "repository_full_name": "Replaced real owner/repo with example-org/watchtower in repository, head_repository, and head.repo",
+      "user_login": "Replaced real GitHub user login with human-author",
+      "pull_request_body": "Replaced original 286-character string body with a generic placeholder",
+      "workflow_run_event_envelope": "Reconstructed action/repository/workflow_run webhook envelope from REST GET /actions/runs/45560323262 because GitHub REST API does not expose raw webhook deliveries"
+    }
+  },
+  "repo": "example-org/watchtower",
+  "workflow_run_event": {
+    "action": "completed",
+    "repository": {
+      "full_name": "example-org/watchtower"
+    },
+    "workflow_run": {
+      "id": 45560323262,
+      "name": "Pull Request",
+      "path": ".github/workflows/pull-request.yml",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "head_sha": "de3c6ad554fd6862008ed03a9c8f5f56c52b2f9d",
+      "head_branch": "chore/ruleset-dry-run",
+      "head_repository": {
+        "full_name": "example-org/watchtower"
+      }
+    }
+  },
+  "pulls_open_observed": [],
+  "pull_detail_observed": {
+    "number": 13,
+    "state": "closed",
+    "draft": false,
+    "commits": 1,
+    "title": "test: ruleset dry run (do not merge)",
+    "body": "Sanitized PR body from ruleset dry run.",
+    "user": {
+      "login": "human-author",
+      "type": "User"
+    },
+    "labels": [],
+    "base": {
+      "ref": "main",
+      "sha": "48191657b1be0b3c30413e68a44a2e31c16423b6"
+    },
+    "head": {
+      "ref": "chore/ruleset-dry-run",
+      "sha": "de3c6ad554fd6862008ed03a9c8f5f56c52b2f9d",
+      "repo": {
+        "full_name": "example-org/watchtower"
+      }
+    }
+  }
+}
