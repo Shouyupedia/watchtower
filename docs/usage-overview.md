@@ -67,3 +67,37 @@ services:
       - /root/.docker/config.json:/config.json
     command: --interval 30
 ```
+
+## macOS binaries
+
+As an alternative to running the container image, macOS binary archives are included starting with releases published after `v1.0.0`. Download the archive for your Mac from the [Releases page](https://github.com/shouyupedia/watchtower/releases):
+
+- `watchtower_darwin_arm64.tar.gz` for Apple Silicon Macs
+- `watchtower_darwin_amd64.tar.gz` for Intel Macs
+
+Both archives contain the `watchtower` executable and `LICENSE.md`. The binaries require **macOS 12 Monterey or newer**, the minimum supported by the Go 1.26 toolchain used for these builds (see the [Go 1.26 release notes](https://go.dev/doc/go1.26)). This minimum follows the Go toolchain: Go 1.27 and later will require macOS 13 Ventura or newer.
+
+Releases published by the automated release pipeline will include a GitHub build provenance attestation; that pipeline is being added in PR 5, so existing releases (including `v1.0.0`) do not have one yet. When an attestation is available, verify it before extracting the archive:
+
+```bash
+gh attestation verify watchtower_darwin_arm64.tar.gz --repo shouyupedia/watchtower
+```
+
+Then extract the archive and run the binary:
+
+```bash
+tar -xzf watchtower_darwin_arm64.tar.gz
+./watchtower --help
+```
+
+The binary still needs a Docker daemon. If the daemon is not reachable at its default endpoint, pass `--host` or set `DOCKER_HOST` as described in [Remote hosts](remote-hosts.md).
+
+The macOS binaries are not signed with a Developer ID certificate and are not notarized: the Apple Silicon (`darwin/arm64`) binary carries only the ad-hoc signature that the Go linker adds, and the Intel (`darwin/amd64`) binary is not code-signed. macOS Gatekeeper quarantines files downloaded by a browser, so the first run can be blocked. If that happens, remove the quarantine attribute and run the binary again:
+
+```bash
+xattr -d com.apple.quarantine ./watchtower
+./watchtower --help
+```
+
+!!! warning
+    Removing the quarantine attribute bypasses Gatekeeper's check. Only do so for an archive you trust, after verifying its provenance attestation when the release provides one.

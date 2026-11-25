@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run govulncheck across all six release targets and evaluate each report with
+# Run govulncheck across all eight release targets (the six Linux/Windows
+# targets plus darwin/amd64 and darwin/arm64) and evaluate each report with
 # scripts/govulncheck-gate.py.
 #
 # Builds govulncheck once for the host platform using the Go toolchain pinned in
@@ -43,6 +44,8 @@ targets=(
   "linux/arm64/"
   "windows/amd64/"
   "windows/386/"
+  "darwin/amd64/"
+  "darwin/arm64/"
 )
 
 for spec in "${targets[@]}"; do
