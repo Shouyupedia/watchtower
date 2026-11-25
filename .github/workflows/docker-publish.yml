@@ -8,12 +8,12 @@ on:
         type: string
         required: true
       tag:
-        description: Release version tag (not enabled until PR 5; must be empty in PR 3)
+        description: Formal release tag, or empty for latest-dev
         type: string
         required: false
         default: ''
       push_latest:
-        description: Also advance :latest tag (not enabled until PR 5; must be false in PR 3)
+        description: Allow promotion of the published formal release to latest
         type: boolean
         required: false
         default: false
@@ -22,12 +22,26 @@ on:
         type: boolean
         required: false
         default: true
+      operation:
+        description: dev, stage, version, or latest
+        type: string
+        default: dev
+      release_digest:
+        description: Attested image digest already reserved by the release writer
+        type: string
+        default: ''
+    outputs:
+      digest:
+        value: ${{ jobs.publish.outputs.digest }}
+      promoted:
+        value: ${{ jobs.release-tags.outputs.promoted }}
 
 permissions: {}
 
 jobs:
   publish:
     name: Build, push by digest, and attest
+    if: inputs.operation == 'dev' || inputs.operation == 'stage'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -37,39 +51,43 @@ jobs:
     outputs:
       image: ${{ steps.meta.outputs.image }}
       revision: ${{ steps.meta.outputs.revision }}
-      digest: ${{ steps.build.outputs.digest }}
+      digest: ${{ steps.build.outputs.digest || inputs.release_digest }}
     steps:
-      - name: Reject version tag and latest publishing until PR 5
-        shell: bash
+      - name: Validate development publication inputs
+        if: inputs.operation == 'dev'
         env:
-          INPUT_TAG: ${{ inputs.tag }}
-          INPUT_PUSH_LATEST: ${{ inputs.push_latest }}
-        run: |
-          set -euo pipefail
-          if [ -n "$INPUT_TAG" ]; then
-            echo "error: docker-publish.yml 'tag' input is not enabled until PR 5 (got '$INPUT_TAG')" >&2
-            exit 1
-          fi
-          if [ "$INPUT_PUSH_LATEST" = "true" ]; then
-            echo "error: docker-publish.yml 'push_latest' is not enabled until PR 5" >&2
-            exit 1
-          fi
+          TAG: ${{ inputs.tag }}
+          PUSH_LATEST: ${{ inputs.push_latest }}
+          DIGEST: ${{ inputs.release_digest }}
+        run: test -z "$TAG" && test "$PUSH_LATEST" = false && test -z "$DIGEST"
+
+      - name: Checkout release scripts at the workflow revision
+        if: inputs.operation == 'stage'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Checkout source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+          path: ${{ inputs.operation == 'stage' && 'release-source' || '.' }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Compute image metadata
         id: meta
         shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+          SOURCE: ${{ inputs.operation == 'stage' && 'release-source' || '.' }}
         run: |
           set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          version="$(git describe --tags --always)"
-          revision="$(git rev-parse HEAD)"
+          version="${TAG:-$(git -C "$SOURCE" describe --tags --always)}"
+          revision="$(git -C "$SOURCE" rev-parse HEAD)"
           {
             echo "image=${image}"
             echo "version=${version}"
@@ -83,7 +101,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check the version tag and any recorded image digest
+        if: inputs.operation == 'stage'
+        id: stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ inputs.ref }}
+          DIGEST: ${{ inputs.release_digest }}
+        run: python -IB .github/scripts/release_image.py stage --tag "$TAG" --sha "$SHA" --digest "$DIGEST"
+
+      - name: Check the image attestation source before building
+        if: steps.stage.outputs.build == 'true'
+        env:
+          SOURCE_SHA: ${{ inputs.ref }}
+        run: |
+          if [ "$GITHUB_SHA" != "$SOURCE_SHA" ]; then
+            echo "::error::Cannot build and attest the image at $SOURCE_SHA with run SHA $GITHUB_SHA. Re-run the original workflow for $SOURCE_SHA."
+            exit 1
+          fi
+
       - name: Build and push image by digest
+        if: inputs.operation == 'dev' || steps.stage.outputs.build == 'true'
         id: build
         uses: ./.github/actions/docker-build
         with:
@@ -91,9 +130,12 @@ jobs:
           image: ${{ steps.meta.outputs.image }}
           version: ${{ steps.meta.outputs.version }}
           revision: ${{ steps.meta.outputs.revision }}
-          disable_cache: ${{ inputs.disable_cache }}
+          context: ${{ inputs.operation == 'stage' && './release-source' || '.' }}
+          dockerfile: ${{ inputs.operation == 'stage' && './release-source/dockerfiles/Dockerfile' || 'dockerfiles/Dockerfile' }}
+          disable_cache: ${{ inputs.operation != 'dev' || inputs.disable_cache }}
 
       - name: Verify pushed digest
+        if: steps.build.outcome == 'success'
         shell: bash
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
@@ -105,6 +147,7 @@ jobs:
           fi
 
       - name: Attest image build provenance
+        if: steps.build.outcome == 'success'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ steps.meta.outputs.image }}
@@ -114,10 +157,8 @@ jobs:
   promote-latest-dev:
     name: Promote latest-dev tag
     needs: publish
+    if: inputs.operation == 'dev'
     runs-on: ubuntu-latest
-    concurrency:
-      group: publish-latest-dev
-      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -168,3 +209,41 @@ jobs:
             exit 1
           fi
           docker buildx imagetools create --tag "${IMAGE}:latest-dev" "${IMAGE}@${DIGEST}"
+
+  release-tags:
+    if: inputs.operation == 'version' || inputs.operation == 'latest'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: read
+    outputs:
+      promoted: ${{ steps.assign.outputs.promoted }}
+    steps:
+      - name: Checkout release scripts at the workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Login to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Assign the recorded digest
+        id: assign
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATION: ${{ inputs.operation }}
+          TAG: ${{ inputs.tag }}
+          SHA: ${{ inputs.ref }}
+          DIGEST: ${{ inputs.release_digest }}
+          PUSH_LATEST: ${{ inputs.push_latest }}
+        run: |
+          set -euo pipefail
+          if [ "$OPERATION" = latest ]; then
+            test "$PUSH_LATEST" = true
+          fi
+          python -IB .github/scripts/release_image.py "$OPERATION" --tag "$TAG" --sha "$SHA" --digest "$DIGEST"

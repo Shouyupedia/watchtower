@@ -1,75 +1,240 @@
-name: Release (Production)
+name: Release Watchtower
 
 on:
-  workflow_dispatch: {}
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
-      - '**/v[0-9]+.[0-9]+.[0-9]+'
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      sha:
+        type: string
+        required: true
+      mode:
+        description: Candidate mode from the entry workflow
+        type: string
+        default: manual
+      skip_ci:
+        type: boolean
+        default: false
+
+permissions: {}
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+  RELEASE_SHA: ${{ inputs.sha }}
+  RELEASE_MODE: ${{ inputs.mode }}
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: 1.26.x
-      - uses: dominikh/staticcheck-action@9716614d4101e79b4340dd97b10e54d68234e431 #v1.4.1
-        with:
-          version: "2026.2.2"
-          install-go: "false" # StaticCheck uses go v1.17 which does not support `any`
-
-  test:
-    name: Test
-    strategy:
-      matrix:
-        go-version:
-          - 1.26.x
-        platform:
-          - ubuntu-latest
-          - macos-latest
-          - windows-latest
-    runs-on: ${{ matrix.platform }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: 1.26.x
-      - name: Run tests
-        run: |
-          go test ./... -coverprofile coverage.out
-
-  build:
-    name: Build
+  resolve:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # goreleaser creates the GitHub release
-    needs:
-      - test
-      - lint
-    env:
-      CGO_ENABLED: 0
-      TAG: ${{ github.ref_name }}
+      contents: read
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      sha: ${{ steps.resolve.outputs.sha }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Validate candidate inputs
+        id: resolve
+        run: python -IB .github/scripts/release_cli.py resolve --mode "$RELEASE_MODE" --tag "$RELEASE_TAG" --sha "$RELEASE_SHA"
+
+  ci:
+    needs: resolve
+    if: '!inputs.skip_ci'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+
+  archives:
+    needs: [resolve, ci]
+    if: >-
+      !cancelled() && needs.resolve.result == 'success' &&
+      (inputs.skip_ci || needs.ci.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    outputs:
+      active: ${{ steps.prepare.outputs.active }}
+      image_digest: ${{ steps.prepare.outputs.image_digest }}
+      draft: ${{ steps.prepare.outputs.draft }}
+    steps:
+      - name: Checkout release scripts at the workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
           fetch-depth: 0
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: .go-version
-      - name: Build
+          persist-credentials: false
+      - name: Check the run SHA before reserving a new version
+        if: inputs.mode == 'new'
+        run: |
+          if [ "$GITHUB_SHA" != "$RELEASE_SHA" ]; then
+            echo "::error::New release $RELEASE_TAG selected $RELEASE_SHA but this run signs for $GITHUB_SHA. Start a fresh scheduled release run from current main."
+            exit 1
+          fi
+      - name: Revalidate the candidate and reserve the draft
+        id: prepare
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: go tool -modfile=tools/go.mod goreleaser release --clean
+          GH_TOKEN: ${{ github.token }}
+        run: python -IB .github/scripts/release_cli.py prepare --mode "$RELEASE_MODE" --tag "$RELEASE_TAG" --sha "$RELEASE_SHA"
+      - name: Checkout verified release sources
+        if: steps.prepare.outputs.build == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Go without caching
+        if: steps.prepare.outputs.build == 'true'
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: release-source/.go-version
+          cache: false
+      - name: Build versioned archives without publishing
+        if: steps.prepare.outputs.build == 'true'
+        working-directory: release-source
+        env:
+          GORELEASER_CURRENT_TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_SHA" != "$RELEASE_SHA" ]; then
+            echo "::error::Cannot build and attest archives for $RELEASE_TAG at $RELEASE_SHA with run SHA $GITHUB_SHA. Re-run the original workflow for $RELEASE_SHA."
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            git tag "$RELEASE_TAG" "$RELEASE_SHA"
+          fi
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$RELEASE_SHA"
+          go build -modfile=tools/go.mod -o .tools/goreleaser github.com/goreleaser/goreleaser/v2
+          .tools/goreleaser release --clean --skip=publish
+      - name: Save ordered asset hashes, create tag, and upload missing files
+        id: stage
+        if: steps.prepare.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -IB .github/scripts/release_cli.py stage-assets --mode "$RELEASE_MODE" --tag "$RELEASE_TAG" --sha "$RELEASE_SHA" --dist release-source/dist
+      - name: Verify existing archive attestations
+        id: attestations
+        if: steps.stage.outputs.attest == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -IB .github/scripts/release_cli.py archive-attestations --mode "$RELEASE_MODE" --tag "$RELEASE_TAG" --sha "$RELEASE_SHA" --dist release-source/dist
+      - name: Attest missing archives and checksums
+        if: steps.attestations.outputs.subjects != ''
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.attestations.outputs.subjects }}
+      - name: Record successful archive attestation
+        if: steps.stage.outputs.attest == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -IB .github/scripts/release_cli.py record-archives --mode "$RELEASE_MODE" --tag "$RELEASE_TAG" --sha "$RELEASE_SHA"
+
+  image:
+    needs: [resolve, archives]
+    if: >-
+      !cancelled() && needs.resolve.result == 'success' && needs.archives.result == 'success' &&
+      needs.archives.outputs.active == 'true' && needs.archives.outputs.draft == 'true'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      tag: ${{ needs.resolve.outputs.tag }}
+      release_digest: ${{ needs.archives.outputs.image_digest }}
+      operation: stage
+
+  save-image:
+    needs: image
+    if: ${{ !cancelled() && needs.image.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Reserve the attested digest before assigning the version tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: python -IB .github/scripts/release_cli.py record-image --mode "$RELEASE_MODE" --tag "$RELEASE_TAG" --sha "$RELEASE_SHA" --digest "$DIGEST"
+
+  version-image:
+    needs: [resolve, image, save-image]
+    if: >-
+      !cancelled() && needs.resolve.result == 'success' &&
+      needs.image.result == 'success' && needs.save-image.result == 'success'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      tag: ${{ needs.resolve.outputs.tag }}
+      release_digest: ${{ needs.image.outputs.digest }}
+      operation: version
+
+  publish-release:
+    needs: version-image
+    if: ${{ !cancelled() && needs.version-image.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Publish the completed draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -IB .github/scripts/release_cli.py publish --mode "$RELEASE_MODE" --tag "$RELEASE_TAG" --sha "$RELEASE_SHA"
+
+  latest:
+    needs: [resolve, archives, image, publish-release]
+    if: >-
+      !cancelled() && needs.archives.result == 'success' && needs.archives.outputs.active == 'true' &&
+      (needs.archives.outputs.draft == 'false' || needs.publish-release.result == 'success')
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      tag: ${{ needs.resolve.outputs.tag }}
+      release_digest: ${{ needs.archives.outputs.image_digest || needs.image.outputs.digest }}
+      push_latest: true
+      operation: latest
+
+  finish:
+    needs: latest
+    if: ${{ !cancelled() && needs.latest.result == 'success' && needs.latest.outputs.promoted == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Record latest promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -IB .github/scripts/release_cli.py finish --mode "$RELEASE_MODE" --tag "$RELEASE_TAG" --sha "$RELEASE_SHA" --promoted true

@@ -160,8 +160,9 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
 | `go-toolchain-sync.yml`（新） | 每周一 02:17 UTC；`push` → `main`；`workflow_dispatch` | 1. **检查任务（只读）**：运行 `.github/scripts/go_toolchain_sync.py check`，查询 `go.dev/dl/?mode=json` 最新稳定版、`index.golang.org` 中 `golang.org/toolchain` 的首次入库 `Timestamp`（10 次请求预算，fail-closed，未实现“首次观察起算”回退；预算内未命中时会阻止该版本的同步尝试，不创建/更新 PR）以及 Docker Hub `golang:<ver>-alpine` 最新 manifest digest 的 `tag_last_pushed`；仅采用同时满 7 天冷却期的目标版本。若与当前 `main` 一致且无待 rebase 的开放同步 PR，直接结束（`push` → `main` 触发时，仅在存在落后的开放 Go 同步分支时继续重放单提交 rebase）。<br>2. **提 PR 任务（`environment: updater`）**：签发 `watchtower-updater` App 短效令牌。同次版本补丁升级仅更新 `.go-version` 与 `dockerfiles/Dockerfile*` 的标签及 digest；跨次版本升级同步更新 `.go-version`、`go.mod` / `tools/go.mod` 的 `go` 指令（含必要的 `go mod tidy`）与 `Dockerfile*` 标签及 digest。通过 GraphQL `createCommitOnBranch` 生成 GitHub 自动签名的单提交并创建/更新 PR（触发 PR CI；补丁版走自动合并，跨次版本留待维护者审批）。 |
 | `push-main.yml`（取代 `release-dev.yaml`） | `push` → `main`，`workflow_dispatch` | 调用 `ci.yml`；通过后调用 `docker-publish.yml` 推送 `:latest-dev`。（由于 `automerge.yml` 使用合并 App 令牌合入，自动合并后的提交也会自动触发本工作流更新 `:latest-dev`。） |
 | `docker-publish.yml`（取代原 `docker.yml`，可复用） | 仅 `workflow_call`（输入 `ref`、`tag`、`push_latest`、`disable_cache`） | 权限：`contents: read`、`packages: write`、`id-token: write`、`attestations: write`。仅用于可信发布（`push-main.yml` 与 `release.yml`）。发布版本 tag 前先检查 GHCR 中目标 tag 是否已存在：绝不覆盖已有版本 tag；若已存在，需核对与预期 `(tag, sha, digest)` 记录一致才跳过，不一致或无法核实时立即失败（相同 OCI `revision` 标签不足以单独证明内容一致）。仅在串行发布锁内再次核实 `tag` 仍为 `main` 上最高正式版本，且版本镜像与证明就绪后，才推进 `:latest` 并生成证明。取消原 `docker.yml` 可覆写旧 tag 的手动入口。 |
-| `release.yml`（改，可复用） | 推送 `v*.*.*` tag（手动发版）；`workflow_call`（输入 `tag`、`sha`、`skip_ci`） | **手动与定时发布共用同一串行写入锁**（`concurrency: { group: release-publish, cancel-in-progress: false }`）。显式解析目标 `tag`（`inputs.tag \|\| github.ref_name`）和对应提交 `sha`。手动推 tag 触发时先在该 `sha` 上调用 `ci.yml`。写入阶段使用 `tools/go.mod` 中的 GoReleaser v2，维护与 `(tag, sha)` 绑定的发布记录（含原始产物摘要/校验和）：仅对新流程创建且未完成的发布补齐缺失产物与证明，绝不覆盖已有 Release 资产或 GHCR 版本 tag；冲突即失败。全部版本产物及证明就绪后，在串行锁内再次核实 `tag` 为 `main` 上最高正式版本，最后才推进 `:latest`。发布构建禁用缓存。 |
-| `scheduled-release.yml`（新） | 每周二 03:23 UTC；`workflow_dispatch` | 1. **检查与判定任务（只读）**：固定 `head_sha = git rev-parse HEAD`，用 `git tag --merged "$head_sha" --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname` 取 `main` 历史上最高的正式 tag（`latest_tag`）。**迁移边界**：早于新发布流水线的历史版本（如现有 `v1.0.0`）不纳入自动恢复，绝不因缺少新格式证明而重建或重签历史版本。仅当 `latest_tag` 存在由新流程记录的未完成发布状态时进入**恢复模式**；否则检查 `latest_tag..head_sha` 之间是否有**影响发布产物的路径变更**（如 Go 源码、`go.mod`/`go.sum`、`.go-version`、`dockerfiles/**`、`goreleaser.yml` 等，排除纯文档、设计稿、模板、`.github/CODEOWNERS` 等路径），无变更则结束，有变更则计算下一个补丁版本号 `next_tag`。<br>2. **验证任务（新发版模式）**：在固定 `head_sha` 上先调用 `ci.yml`，通过后才继续；失败即终止，**不打 tag**。<br>3. **打 tag 与发布任务（共用 `release-publish` 串行锁）**：新发版模式确认 `next_tag` 尚不存在后用 `GITHUB_TOKEN` 创建带注释的 tag 并推送（不触发 tag 工作流），随后 `workflow_call` 调用 `release.yml`（`skip_ci: true`）；恢复模式直接调用 `release.yml` 在同 SHA 验证后补齐缺失产物。 |
+| `release-tag.yml`（手动入口） | 推送正式版本 tag；在 `main` 上用 `workflow_dispatch` 重放已有 tag | 验证 tag 与提交，检查发布状态，未完成的草稿在固定 SHA 上通过完整 `ci.yml` 后进入共用发布锁。已完成的发布直接结束；正式 Release 已发布而 `:latest` 尚待推进时只运行镜像核验与推进阶段。 |
+| `release.yml`（可复用） | `workflow_call`（输入 `tag`、`sha`、`mode`、`skip_ci`） | **入口工作流持有 `release-publish` 锁**。`release.yml` 与 `docker-publish.yml` 均不声明并发组。`skip_ci=false` 时先在指定 SHA 上调用 `ci.yml`。入口调用时已在锁外完成 CI，写入任务取锁后重新判定候选。GoReleaser v2 以无缓存方式生成版本化归档，发布脚本按草稿记录只补缺失文件与证明。全部版本产物及证明就绪后才发布草稿，再核验最高正式版本并推进 `:latest`。 |
+| `scheduled-release.yml`（新） | 每周二 03:23 UTC；`workflow_dispatch` | 默认手动彩排以 `contents: read` 构建并校验 GoReleaser snapshot，同时构建多架构 Docker 镜像。正式运行从 `main` 固定 `head_sha`，通过 `.github/scripts/release_paths.py` 判断是否有影响发布的路径变更，或选取可恢复的发布；计划任务需要 `contents: write` 权限以读取草稿列表，实际只执行查询。对待发布候选在锁外完成 `ci.yml`，含 macOS；取锁后重新核对 `head_sha`、目标 tag 与恢复状态。随后 `release.yml` 以 `GITHUB_TOKEN` 建立带标记的附注 tag，由同一调用继续发布。 |
 | `codeql-analysis.yml`（改） | 不变 | 顶层 `permissions: {}`，任务级 `actions: read`、`contents: read`、`security-events: write`，钉 SHA，删除已过时的 `git checkout HEAD^2` 步骤。 |
 | 删除 | — | `greetings.yml`、`dependabot-approve.yml`、`release-dev.yaml`、`publish-docs.yml`（不发布 GitHub Pages）、原 `docker.yml` |
 
@@ -169,6 +170,7 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
 
 - **先验证，再打 tag，最后发布**：新版本候选固定到具体 `head_sha`，完整 `ci.yml` 通过前绝不创建 tag，避免留下无产物的死 tag。
 - **迁移边界与中断恢复**：历史版本（如现有 `v1.0.0`）早于新证明机制，绝不因缺少新格式证明而重建或重签。仅恢复由新流程记录的未完成发布，绑定 `tag`、`sha` 与原始产物摘要/校验和，只补缺失项、绝不覆盖已有产物，冲突即失败交由人工介入。
+- **证明绑定源提交**：GitHub OIDC 证书的源提交取自调用方运行的 `GITHUB_SHA`。构建并签发归档或镜像证明前，要求该值等于预期提交。复用已有证明时，用 `gh attestation verify --source-digest <sha>` 校验源提交，同时校验签发工作流。
 - **串行发布与 `:latest` 只进不退**：手动推 tag 与定时发布共用同一串行写入锁（`release-publish`）；在所有版本产物与证明就绪后，于锁内再次核实该 `tag` 仍为 `main` 上最高正式版本，最后才更新 `:latest`。
 - **自动发布只发补丁版本**；次版本和大版本由维护者手动推 tag，走同一个 `release.yml`。
 - **纯文档提交不触发发版**：只有影响二进制或镜像产物的路径变更才计入发版条件，避免文档修改导致所有运行 Watchtower 的宿主机无意义自更新；Go 工具链、依赖模块和基础镜像 digest 更新合入 `main` 后会自动纳入下一次发版。
@@ -213,7 +215,11 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
 - 初始 `.go-version` 钉死的具体补丁版本号，以及首次合入后是否由 `go-toolchain-sync.yml` 自动发起首个 `1.26 → 1.27` 跨次版本升级 PR 供维护者审核。
 - `tools/go.mod` 中 `goreleaser/v2`、`staticcheck`、`govulncheck` 的具体最新稳定版本，以及 `govulncheck` 基线漏洞清理与限时豁免清单文件的具体格式。
 - `zizmor` 的接入方式（固定版本二进制或容器/pip）和严重级别阈值。当前全部工作流需要在新配置下零告警，必要的豁免逐条写理由。
-- `scheduled-release.yml` 中"影响发布产物的路径"判定表与未完成发布状态记录的具体存储格式。
+- 发布白名单包含 Go 源码、Go 模块与工具链、Docker 和 GoReleaser 配置，以及直接参与构建的工作流与许可证。脚本检查上一正式版本到候选提交的净变更，重命名按旧路径删除和新路径新增计算。
+- 草稿 Release 的正文日志先保留 `(tag, sha)`，后写入全部资产哈希；正式创建 tag 前上传一次不可覆盖的 `release-record.json`。已标记的 tag 可恢复缺失的草稿。镜像以 digest 上传并证明，写入草稿日志后才绑定版本 tag。正式发布后若 `:latest` 推进中断，重放先核验已记录的版本 digest 和证明；同一 digest 已在 `:latest` 时只补记完成状态。
+- 两个入口在 CI 之后共用 `release-publish` 并发组。GitHub 默认只保留一个待运行任务，可能顶掉手动 tag 的发布任务。若仍需构建，使用 GitHub Actions 的 **Re-run jobs** 重跑原定时运行或 tag 推送运行，以保留匹配的 `GITHUB_SHA`。`release-tag.yml` 从 `main` 手动重放旧 tag 时，可复用已记录并通过校验的归档和镜像，也可补做 `:latest` 推进。若原运行已无法重跑且仍需构建，保留预留记录并由维护者核查。`push-main.yml` 独立持有 `publish-latest-dev` 串行锁。
+- tag 推送事件从被标记的提交加载工作流。必须将正式 tag 的创建和更新权限限定给可信发布者，发布者只标记经审核的 `main` 提交。运行时祖先核验只约束发布的提交。并发锁协调这些入口，GHCR 的 tag 更新与 GitHub 的 tag 创建之间没有跨服务原子操作，外部写入者必须遵守相同发布规则。
+- 重试只补齐能与日志对应的产物。被中断的无标签镜像推送可能留下孤立 digest；日志写入前可重新构建。GitHub 若留下 `starter` 资产或构建重现的哈希发生变化，发布停止，由维护者核查后恢复。彩排只验证构建，证明、GHCR 和并发行为需要在授权的彩排仓库验证。首次正式版本计划为 `v1.0.1`，在 `main-checks` 生效后从 `main` 手动取消勾选 `dry_run`。
 - 覆盖率上传保留在 `ci.yml` 里，用输入开关控制，失败不阻断。
 - `docs/index.md` 徽章的具体替换。
 
