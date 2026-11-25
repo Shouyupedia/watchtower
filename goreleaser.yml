@@ -5,6 +5,9 @@ project_name: watchtower
 builds:
   - main: ./main.go
     binary: watchtower
+    flags:
+      - -trimpath
+    mod_timestamp: '{{ .CommitTimestamp }}'
     env:
       - CGO_ENABLED=0
     # Exactly the eight release targets: the six archives shipped in v1.0.0
@@ -34,4 +37,13 @@ archives:
         formats:
           - zip
     files:
-      - LICENSE.md
+      - src: LICENSE.md
+        info:
+          mtime: '{{ .CommitDate }}'
+
+# The release writer supplies the draft body and verifies the archive contract.
+changelog:
+  disable: true
+
+release:
+  draft: true
