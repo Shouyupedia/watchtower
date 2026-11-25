@@ -1,0 +1,72 @@
+name: Release a maintainer tag
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing formal tag to replay from main
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  plan:
+    # Tag pushes load workflow code from the tagged commit. Restrict tag
+    # creation to trusted maintainers and tag reviewed commits on main.
+    if: >-
+      (github.event_name == 'push' && !github.event.deleted) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      # Draft visibility is required to distinguish an interrupted release.
+      contents: write
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      sha: ${{ steps.plan.outputs.sha }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve tag and check release state
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          EVENT_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
+        run: python -IB .github/scripts/release_cli.py plan --mode manual --tag "$TAG" --sha "$EVENT_SHA"
+
+  ci:
+    needs: plan
+    if: needs.plan.outputs.mode == 'manual'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.plan.outputs.sha }}
+
+  publish:
+    needs: [plan, ci]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.ci.result == 'success' || needs.plan.outputs.mode == 'manual_published')
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.plan.outputs.tag }}
+      sha: ${{ needs.plan.outputs.sha }}
+      mode: ${{ needs.plan.outputs.mode }}
+      skip_ci: true

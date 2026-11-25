@@ -1,0 +1,102 @@
+name: Scheduled release
+
+on:
+  schedule:
+    - cron: '23 3 * * 2'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build the snapshot and Docker image without publishing
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  dry-run-snapshot:
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: .go-version
+          cache: false
+      - name: Build and verify the eight snapshot archives and checksums
+        run: |
+          go tool -modfile=tools/go.mod goreleaser release --snapshot --clean
+          bash scripts/check-release-contract.sh dist
+
+  dry-run-docker:
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the release image without pushing
+        uses: ./.github/actions/docker-build
+        with:
+          push: 'false'
+          version: dry-run
+          disable_cache: 'true'
+
+  plan:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || !inputs.dry_run)
+    runs-on: ubuntu-latest
+    permissions:
+      # GitHub only lists draft releases for callers with push access.
+      contents: write
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      tag: ${{ steps.plan.outputs.tag }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select the scheduled candidate
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -I .github/scripts/release_cli.py plan --mode scheduled
+
+  ci:
+    needs: plan
+    if: >-
+      needs.plan.outputs.mode != 'skip' && needs.plan.outputs.mode != 'recover_published' &&
+      (github.event_name == 'workflow_dispatch' || needs.plan.outputs.mode != 'new' ||
+      needs.plan.outputs.tag != 'v1.0.1')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.plan.outputs.sha }}
+
+  publish:
+    needs: [plan, ci]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.ci.result == 'success' || needs.plan.outputs.mode == 'recover_published')
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.plan.outputs.tag }}
+      sha: ${{ needs.plan.outputs.sha }}
+      mode: ${{ needs.plan.outputs.mode }}
+      skip_ci: true

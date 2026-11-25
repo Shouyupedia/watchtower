@@ -21,6 +21,9 @@ jobs:
     name: Publish latest-dev
     needs: ci
     if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: publish-latest-dev
+      cancel-in-progress: false
     uses: ./.github/workflows/docker-publish.yml
     with:
       ref: ${{ github.sha }}
