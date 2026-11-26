@@ -60,12 +60,14 @@ DOCKERFILES: tuple[str, ...] = (
     "dockerfiles/Dockerfile.self-contained",
     "dockerfiles/Dockerfile.dev-self-contained",
 )
-GO_MODS: tuple[str, ...] = ("go.mod", "tools/go.mod")
+GO_MODS: tuple[str, ...] = ("go.mod", "tools/go.mod", "tools/actionlint/go.mod")
 GO_MOD_AND_SUMS: tuple[str, ...] = (
     "go.mod",
     "go.sum",
     "tools/go.mod",
     "tools/go.sum",
+    "tools/actionlint/go.mod",
+    "tools/actionlint/go.sum",
 )
 SAME_MINOR_ALLOWED_PATHS: frozenset[str] = frozenset((GO_VERSION_FILE, *DOCKERFILES))
 CROSS_MINOR_ALLOWED_PATHS: frozenset[str] = frozenset(
@@ -614,7 +616,8 @@ def build_commit_and_pr_text(
             "- `.go-version`\n"
             "- `dockerfiles/Dockerfile`, `dockerfiles/Dockerfile.self-contained`, "
             "`dockerfiles/Dockerfile.dev-self-contained`\n"
-            "- `go.mod`, `tools/go.mod` (`go` directive) and `go mod tidy` updates"
+            "- `go.mod`, `tools/go.mod`, `tools/actionlint/go.mod` (`go` directive) "
+            "and `go mod tidy` updates"
         )
         review_note = (
             "Cross-minor Go toolchain upgrade; requires maintainer review and approval."
@@ -901,7 +904,7 @@ def plan_sync(
 
 
 def default_tidy_runner(workdir: Path, target_version: GoVersion) -> None:
-    """Run ``go mod tidy`` for root and ``tools`` using the exact target Go."""
+    """Run ``go mod tidy`` in every Go module using the exact target Go."""
     env = {**os.environ, "GOTOOLCHAIN": "local"}
     ver_proc = subprocess.run(
         ["go", "env", "GOVERSION"],
@@ -920,7 +923,7 @@ def default_tidy_runner(workdir: Path, target_version: GoVersion) -> None:
             f"cross-minor tidy requires {expected} on PATH, found {actual!r}"
         )
 
-    for rel_dir in (".", "tools"):
+    for rel_dir in (".", "tools", "tools/actionlint"):
         proc = subprocess.run(
             ["go", "mod", "tidy"],
             cwd=workdir / rel_dir,
@@ -1665,7 +1668,7 @@ def format_dry_run_report(
             lines.append("")
             lines.append(
                 "Note: cross-minor upgrade will also run `go mod tidy` in "
-                "`.` and `tools/`."
+                "`.`, `tools/` and `tools/actionlint/`."
             )
     return "\n".join(lines)
 

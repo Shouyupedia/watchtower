@@ -7,9 +7,9 @@ Checked invariants:
 * The three Dockerfiles build from ``golang:<version>-alpine@sha256:<digest>``
   whose <version> matches ``.go-version`` exactly and whose digest is a full
   sha256.
-* The ``go`` directive in ``go.mod`` and ``tools/go.mod`` is in the same
-  MAJOR.MINOR series as ``.go-version`` and its minimum patch level is not
-  newer than ``.go-version``. The directive is the *minimum* language version
+* The ``go`` directive in ``go.mod``, ``tools/go.mod`` and
+  ``tools/actionlint/go.mod`` is in the same MAJOR.MINOR series as
+  ``.go-version`` and its minimum patch level is not newer than ``.go-version``. The directive is the *minimum* language version
   and is allowed to lag the patch level; a different minor/major series or a
   minimum patch higher than ``.go-version`` is drift and fails.
 
@@ -32,7 +32,7 @@ DOCKERFILES = (
     "dockerfiles/Dockerfile.self-contained",
     "dockerfiles/Dockerfile.dev-self-contained",
 )
-GO_MODS = ("go.mod", "tools/go.mod")
+GO_MODS = ("go.mod", "tools/go.mod", "tools/actionlint/go.mod")
 
 GO_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 GO_DIRECTIVE_RE = re.compile(r"^go\s+(\d+)\.(\d+)(?:\.(\d+))?\s*$")

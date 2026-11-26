@@ -32,6 +32,25 @@ updates:
           - "minor"
           - "patch"
 
+  # actionlint lives in its own module: v1.7.12 only builds against
+  # go.yaml.in/yaml/v4 rc.3, while goreleaser in /tools needs rc.6.
+  - package-ecosystem: "gomod"
+    directory: "/tools/actionlint"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+      semver-patch-days: 3
+      semver-minor-days: 7
+      semver-major-days: 30
+    allow:
+      - dependency-type: "all"
+    groups:
+      actionlint-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
   - package-ecosystem: "docker"
     directory: "/dockerfiles"
     schedule:
