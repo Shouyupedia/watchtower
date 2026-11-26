@@ -1,6 +1,6 @@
 module github.com/containrrr/watchtower/tools
 
-go 1.26.4
+go 1.27.0
 
 tool (
 	github.com/goreleaser/goreleaser/v2

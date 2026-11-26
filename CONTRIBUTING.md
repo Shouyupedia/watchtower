@@ -3,11 +3,11 @@ To contribute code changes to this project you will need the following developme
  * [Go](https://golang.org/doc/install)
  * [Docker](https://docs.docker.com/engine/installation/)
  
-Watchtower requires at least Go 1.26.
+Watchtower requires at least Go 1.27.
 You can check your current version of the go language as follows:
 ```bash
   ~ $ go version
-  go version go1.26.10 darwin/amd64
+  go version go1.27.4 darwin/amd64
 ```
 
 
