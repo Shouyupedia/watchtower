@@ -178,9 +178,11 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
 # ``dependency-group`` metadata instead; it is only sound while the
 # repository's "Grouped security updates" setting stays off (the API does not
 # expose that setting) and dependabot.yml defines no security-update groups.
-CALIBRATED_NORMAL_UPDATE_SIGNALS: frozenset[str] = frozenset()
 DEPENDABOT_BODY_SIGNAL = "dependabot-body-v1"
 DEPENDABOT_GROUP_SIGNAL = "dependabot-group-v1"
+CALIBRATED_NORMAL_UPDATE_SIGNALS: frozenset[str] = frozenset(
+    {DEPENDABOT_GROUP_SIGNAL}
+)
 
 DEPENDABOT_CONFIG_FILE = ".github/dependabot.yml"
 # Version-update groups in dependabot.yml, keyed by Go module root.

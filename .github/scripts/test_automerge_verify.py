@@ -759,8 +759,14 @@ class ConstantsTests(AutomergeTestCase):
     def test_required_workflow_names_and_paths(self) -> None:
         self.assertEqual(av.REQUIRED_WORKFLOWS, EXPECTED_REQUIRED_WORKFLOWS)
 
-    def test_calibrated_signals_are_intentionally_empty(self) -> None:
-        self.assertEqual(av.CALIBRATED_NORMAL_UPDATE_SIGNALS, frozenset())
+    def test_calibrated_signals_only_enable_group_signal(self) -> None:
+        self.assertEqual(
+            av.CALIBRATED_NORMAL_UPDATE_SIGNALS,
+            frozenset({GROUP_SIGNAL}),
+        )
+        self.assertNotIn(
+            av.DEPENDABOT_BODY_SIGNAL, av.CALIBRATED_NORMAL_UPDATE_SIGNALS
+        )
         self.assertEqual(av.DEPENDABOT_BODY_SIGNAL, SIGNAL)
 
     def test_allowed_authors_and_ecosystems(self) -> None:
@@ -1489,10 +1495,10 @@ class SensitivePathTests(AutomergeTestCase):
 
 
 class DependabotSignalTests(AutomergeTestCase):
-    def test_default_calibration_rejects_every_dependabot_pr(self) -> None:
+    def test_default_calibration_rejects_ungrouped_dependabot_pr(self) -> None:
         scenario = Scenario()
-        # Do not pass calibrated_signals at all: the module default (empty) is
-        # the behaviour under test.
+        # Do not pass calibrated_signals at all: the module default only
+        # enables the group signal, so body-only PRs stay rejected.
         decision = scenario.verify_with_module_defaults()
         self.assertRejected(
             decision, "body cannot distinguish version and security updates"
@@ -1912,9 +1918,9 @@ class GroupSignalTests(AutomergeTestCase):
         scenario.commits[0]["commit"]["message"] = message
         return scenario
 
-    def test_signed_group_update_is_eligible_only_when_enabled(self) -> None:
+    def test_signed_group_update_is_eligible_by_default_and_gated(self) -> None:
         scenario = self.group_scenario()
-        decision = scenario.verify(signals=frozenset({GROUP_SIGNAL}))
+        decision = scenario.verify_with_module_defaults()
         self.assertEligible(decision, pr_number=42, head_sha=HEAD_SHA)
         self.assertRejected(
             scenario.verify(signals=CALIBRATED),

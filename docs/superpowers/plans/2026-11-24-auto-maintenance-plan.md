@@ -334,7 +334,7 @@ python -I -m unittest discover -s .github/scripts -v
       - `/tools` 作业因若干 `go-openapi/*` 包 `dependency_file_not_resolvable` 而失败，但仍生成分组 PR #37（178 项更新）。#37 的提交信息在 65536 字符处被截断，元数据只列出前 32 项，其中 1 项为 semver-major。它与 `main` 冲突，因此没有触发 CI。
       - 现有 10 个逐包 PR 的签名提交都不带 `dependency-group`。
       - 维护者确认 “Grouped security updates” 为关闭。
-      - 据此实现候选信号 `dependabot-group-v1`，规则见设计稿 §3「拒绝安全更新」。离线回放中，#36 的签名数据命中该信号，#37 因元数据截断被拒。该信号是否加入 `CALIBRATED_NORMAL_UPDATE_SIGNALS`，由维护者单独决定。
+      - 据此实现并启用 `dependabot-group-v1`（已加入 `CALIBRATED_NORMAL_UPDATE_SIGNALS`，`dependabot-body-v1` 仍保持禁用），规则见设计稿 §3「拒绝安全更新」。离线回放中，#36 的签名数据命中该信号，#37 因元数据截断被拒；线上自动合并效果待下一个 Go 分组 PR 观察。
 - [ ] 手动触发 `scheduled-release.yml`：固定 SHA → CI → tag → GoReleaser v2 → GHCR + 证明全链路通过。
   - **2026-11-26 状态**：`main` 上的 `dry_run=true` 托管彩排（run `45745244198`）已通过；待维护者确认后触发正式发布 `v1.0.1`（`dry_run=false`）验证全链路。
 - [ ] Actions 页确认 `go-toolchain-sync.yml` 与 `scheduled-release.yml` 为 `active`；把"60 天无活动会被停用"写进你的日历提醒（`scheduled-release` 本身不产生活动，合入频繁时自然续期，但无新提交时需要关注）。
