@@ -24,13 +24,10 @@ Design rules enforced here
   ``docker`` and ``pip``; ``github_actions`` is never eligible.  File and
   line-level whitelists, major-version rejection and registry cooldowns are
   applied per ecosystem.
-* Dependabot security updates must never be auto-merged.  Although M1 enabled
-  Dependabot security updates on 2026-11-25 (``d3484b7``), this repository has
-  no real normal/security-update PR pair yet, so there is **no calibrated
-  positive signal** that a Dependabot PR is an ordinary version update.  The
-  default ``CALIBRATED_NORMAL_UPDATE_SIGNALS`` set is intentionally empty:
-  every Dependabot PR is therefore ineligible and goes to manual review.  Add
-  a signal only after it has been calibrated against real samples in M3.
+* Dependabot security updates go to manual review. Offline checks found real
+  version and security updates sharing the same body shape, so until the
+  verifier can establish the update kind for the exact PR head, all Dependabot
+  PRs require manual review.
 * Go-toolchain PRs from ``watchtower-updater[bot]`` may be eligible only for a
   single same-minor patch increment (exactly ``+1``) that synchronises
   ``.go-version`` and all three Dockerfiles, with both the Go toolchain and the
@@ -176,11 +173,8 @@ PEP503_RE = re.compile(r"[-_.]+")
 
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
 
-# A candidate signal is *detected* from Dependabot's generated PR body, but it
-# is not trusted until it has been calibrated against real samples.  M1 is
-# complete (2026-11-25, ``d3484b7``), but no real Dependabot normal/security
-# PR pair exists yet; the set stays empty until M3 can compare real samples.
-# Until then: manual review.
+# Real security updates can carry the same body shape. Keep the candidate out
+# of the production allowlist until the update kind is verifiable per PR head.
 CALIBRATED_NORMAL_UPDATE_SIGNALS: frozenset[str] = frozenset()
 DEPENDABOT_BODY_SIGNAL = "dependabot-body-v1"
 
@@ -1530,7 +1524,7 @@ def _detect_normal_update_signal(pr: dict) -> str | None:
     Detection is deliberately conservative and structural: Dependabot's
     generated body starts with a bump line and contains at least one details
     section.  Detection alone is never enough; the signal must also be in the
-    calibrated allowlist (empty until real samples exist).
+    calibrated allowlist. Real security PRs can have this same structure.
     """
     body = pr.get("body")
     if not isinstance(body, str) or not body.strip():
@@ -1573,7 +1567,7 @@ def _check_dependabot_update_kind(
     )
     _require(
         signal in calibrated_signals,
-        "ordinary-update signal is not calibrated against real samples; "
+        "PR body cannot distinguish version and security updates; "
         "manual review required",
     )
 

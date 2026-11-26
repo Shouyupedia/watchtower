@@ -1494,7 +1494,9 @@ class DependabotSignalTests(AutomergeTestCase):
         # Do not pass calibrated_signals at all: the module default (empty) is
         # the behaviour under test.
         decision = scenario.verify_with_module_defaults()
-        self.assertRejected(decision, "not calibrated against real samples")
+        self.assertRejected(
+            decision, "body cannot distinguish version and security updates"
+        )
         self.assertIn("manual review required", decision.reason)
         # The same scenario becomes eligible only once the signal is added.
         self.assertEligible(
@@ -1512,7 +1514,7 @@ class DependabotSignalTests(AutomergeTestCase):
         scenario = Scenario()
         self.assertRejected(
             scenario.verify(signals={"some-other-signal"}),
-            "not calibrated against real samples",
+            "body cannot distinguish version and security updates",
         )
 
     def test_security_label_rejected_even_when_calibrated(self) -> None:

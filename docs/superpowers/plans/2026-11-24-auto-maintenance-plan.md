@@ -21,7 +21,7 @@
 | PR 3 | 只读 CI 体系、可信镜像发布基础、Dependabot、CodeQL/文档工作流 | PR 2 | 实现者 | 已合并（#12） |
 | M1 | 建 2 个 GitHub App、2 个 Environment、安全设置 | 可与 PR 1–3 并行 | 维护者 | 已完成（2026-11-25） |
 | M2 | 创建 `main-checks`、`main-review` Ruleset | PR 3 合入并跑过 | 维护者 | 已完成（2026-11-25） |
-| PR 4 | `automerge.yml`、`go-toolchain-sync.yml` 及其校验脚本 | M1、M2 | 实现者 | 已合并（#14）；正向自动合并待 M3 校准 |
+| PR 4 | `automerge.yml`、`go-toolchain-sync.yml` 及其校验脚本 | M1、M2 | 实现者 | 已合并（#14）；真实样本已排除正文信号，正向自动合并待验收 |
 | PR 4b | macOS 发布目标（`darwin/amd64`、`darwin/arm64`），发布契约 6 → 8 个归档 | PR 4 | 实现者 | 已合并（#27，原 #15 合入堆叠分支后重提） |
 | PR 5 | `release.yml`、`scheduled-release.yml`、证明与 SBOM | PR 4b | 实现者 | 已合并（#34，原 #16 合入堆叠分支后重提）；dry-run 托管彩排已通过（`45745244198`），首次正式发布待触发 |
 | M3 | 端到端验收 | 全部 | 维护者 + 实现者 | 进行中 |
@@ -218,7 +218,9 @@ git ls-remote ... # 每个 uses SHA 与版本 tag 逐一核对（可写成 scrip
   - 找出只读任务**可靠**的区分信号（分支名、PR 正文固定段落、标签、提交元数据、Dependabot alerts API 是否对只读令牌可用等），并为每一类信号写正反用例。
   - **证据不足的处理**：只要无法确定一个 PR 不是安全更新（信号缺失、结构异常、API 不可读），一律 `eligible=false` 转人工；宁可让普通更新多走一次人工审核，也不能让安全更新自动合并。
   - 通过标准：真实普通更新样本 → 判定为普通；真实安全更新样本 → `eligible=false`；缺字段样本 → `eligible=false`。
-  - **PR 4 实测与校准边界（2026-11-25）**：仓库尚未产生真实 Dependabot 普通更新与安全更新成对样本，`.github/scripts/fixtures/` 中的 Dependabot 与工具链夹具均为手工合成夹具（仅 `human_pr13_replay.json` 为脱敏后的真实人工 PR #13 离线回放样本）；因此 `automerge_verify.py` 的 `CALIBRATED_NORMAL_UPDATE_SIGNALS` 保持有意为空（`frozenset()`），所有 Dependabot PR 均 fail-closed（`eligible=false`）转人工审核，待 M3 采集真实成对样本校准后再启用正向信号。
+  - **2026-11-26 部分完成：真实样本校准**。离线复核真实样本后确认：Dependabot 的普通更新与安全更新可以使用完全相同的正文结构与标签，正文信号不能作为区分依据，因此不加入白名单。样本来源与逐条证据只保留在本地校准记录，不写入公开文档。
+  - 另一个候选方向是分组更新（已验证签名提交中的 `dependency-group` 元数据）。它对安全更新同样适用，还需校验受信任配置中的组用途和实际改动目录；单个外部样本不足以放行本仓库的 Go、Docker 或 pip 更新。
+  - **正向自动合并仍待验收**：在取得可绑定到具体 PR 与 head SHA 的普通更新凭据前，Dependabot PR 继续转人工审核，上方通过标准尚未满足。
 - [x] **4.2 实现冷却期查询**：
   - Go 模块：读 `https://index.golang.org/index?since=...` 查询模块版本首次入库 `Timestamp`；先**实测索引接口分页与按模块过滤能力**（它按时间排序、不支持按模块查询，需要评估扫描成本）。若无法在合理请求数内定位，则 fail-closed（`eligible=false`），并在 PR 描述中说明 Go 模块自动合并因此退化为人工审核，由你决定是否接受或另寻可信来源。**这是整个计划里最大的不确定点，先 spike 再继续。**
     - **4.2 实测结论（2026-11-25）**：`cooldown.go_first_seen` 仅将 `proxy.golang.org` 的 `.info` `Time` 作为前向扫描起点提示（`since = Time - 60s`），不将其当作可信发布时间；请求预算固定为 10 次（1 次 `.info` + 最多 9 页 `index.golang.org/index`，每页上限 2000 条）。实测样本中约 6/12 个 Go 模块命中，`golang.org/toolchain` 未在 10 次请求预算内命中。按 fail-closed 原则：未命中的 Go 模块升级 PR 判定 `eligible=false` 转人工审核；`go_toolchain_sync.py` 未命中时拒绝创建/更新工具链 PR（`needs_sync=False`），`automerge_verify.py` 亦判定 `eligible=false`（均未实现“首次观察起算”回退）。
@@ -324,13 +326,14 @@ python -I -m unittest discover -s .github/scripts -v
 - [ ] 观察首批 Dependabot PR：低风险补丁/次版本在 `Pull Request` + `CodeQL` 全绿且冷却期满足后由 `watchtower-automerge` 合入；GitHub Actions PR 与安全更新 PR 被拦；同时核对 `/tools` 的 `tool` 依赖是否被 Dependabot 识别、`pip` PR 是否保持 `--hash` 格式（2.6 的遗留验证）。
   - **2026-11-26 状态**：
     - 已核实 Dependabot 识别 `/tools` 依赖并开启多条升级 PR（#17–#26、#28–#33 等）。
-    - #19、#24、#32、#33 均由维护者账号合并；近期 `Automerge` 运行（如 `45743494426`）中 `Verify automerge eligibility` 成功、`Merge verified pull request` 为 `skipped`。当前配置限制：4.1a 的 `CALIBRATED_NORMAL_UPDATE_SIGNALS` 仍有意为空（`frozenset()`），所有 Dependabot PR 均会 fail-closed 转人工，不会产出机器人自动合并；需先收集可确认的普通更新与安全更新真实样本完成 4.1a 校准，再验收正向自动合并。
+    - #19、#24、#32、#33 均由维护者账号合并；近期 `Automerge` 运行（如 `45743494426`）中 `Verify automerge eligibility` 成功、`Merge verified pull request` 为 `skipped`。4.1a 的离线复核表明正文信号无法区分普通更新与安全更新，当前白名单为空，普通更新的机器人合并仍需取得与 PR head SHA 绑定的可信证据。
     - GitHub Actions PR、安全更新 PR 与 `pip` PR（`--hash` 格式）待后续观察。
 - [ ] 手动触发 `scheduled-release.yml`：固定 SHA → CI → tag → GoReleaser v2 → GHCR + 证明全链路通过。
   - **2026-11-26 状态**：`main` 上的 `dry_run=true` 托管彩排（run `45745244198`）已通过；待维护者确认后触发正式发布 `v1.0.1`（`dry_run=false`）验证全链路。
 - [ ] Actions 页确认 `go-toolchain-sync.yml` 与 `scheduled-release.yml` 为 `active`；把"60 天无活动会被停用"写进你的日历提醒（`scheduled-release` 本身不产生活动，合入频繁时自然续期，但无新提交时需要关注）。
   - **2026-11-26 已核实**：`gh workflow list --all` 确认 `Go Toolchain Sync` 与 `Scheduled release` 均为 `active`；日历提醒待维护者自行设置。
 - [ ] 负面验收：用一个测试 PR（改一行文档）确认**非机器人 PR 不会被自动合并**；用无 admin 权限的身份开 PR，确认无法绕过 `main-review`。
+  - **2026-11-26 已核实（前半项）**：PR #35（`b4b30c5`，仅改计划文档）在 `Pull Request`（run `45749026165`）与 `CodeQL`（run `45749025947`）全绿后触发 `Automerge`（run `45749585531`），`Verify automerge eligibility` 明确输出 `automerge verify: eligible=false: author Shouyupedia is not allowed`，`Merge verified pull request` 为 `skipped`，PR 保持 `OPEN`。后半项（无 admin 权限身份无法绕过 `main-review`）待验收。
 
 ## 风险与回滚
 
