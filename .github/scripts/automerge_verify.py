@@ -173,10 +173,32 @@ PEP503_RE = re.compile(r"[-_.]+")
 
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
 
-# Real security updates can carry the same body shape. Keep the candidate out
-# of the production allowlist until the update kind is verifiable per PR head.
-CALIBRATED_NORMAL_UPDATE_SIGNALS: frozenset[str] = frozenset()
+# Real security updates can carry the same body shape, so the body signal must
+# never be calibrated. The group signal reads the signed head commit's
+# ``dependency-group`` metadata instead; it is only sound while the
+# repository's "Grouped security updates" setting stays off (the API does not
+# expose that setting) and dependabot.yml defines no security-update groups.
 DEPENDABOT_BODY_SIGNAL = "dependabot-body-v1"
+DEPENDABOT_GROUP_SIGNAL = "dependabot-group-v1"
+CALIBRATED_NORMAL_UPDATE_SIGNALS: frozenset[str] = frozenset(
+    {DEPENDABOT_GROUP_SIGNAL}
+)
+
+DEPENDABOT_CONFIG_FILE = ".github/dependabot.yml"
+# Version-update groups in dependabot.yml, keyed by Go module root.
+GO_VERSION_UPDATE_GROUPS = {".": "go-minor-patch", "tools": "tools-minor-patch"}
+GROUP_UPDATE_TYPES = frozenset(
+    {"version-update:semver-minor", "version-update:semver-patch"}
+)
+_UPDATED_DEPENDENCY_KEYS = frozenset(
+    {
+        "dependency-name",
+        "dependency-version",
+        "dependency-type",
+        "update-type",
+        "dependency-group",
+    }
+)
 
 _SECURITY_BODY_MARKERS = (
     "this update includes a security fix",
@@ -909,7 +931,8 @@ def _validate_go_mod_change(
     head_text: str,
     http_get: cooldown.HttpGet,
     now: datetime,
-) -> None:
+) -> set[str]:
+    """Validate the go.mod diff and return the upgraded or added modules."""
     base_directives, base_requires, base_indirect = _parse_go_mod(base_text, "base go.mod")
     head_directives, head_requires, _ = _parse_go_mod(head_text, "head go.mod")
     _require(
@@ -952,6 +975,11 @@ def _validate_go_mod_change(
         )
         changes += 1
     _require(changes > 0, "go.mod has no allowed require change")
+    return {
+        module
+        for module, version in head_requires.items()
+        if base_requires.get(module) != version
+    }
 
 
 def _parse_docker_image(image: str) -> tuple[str, str]:
@@ -1442,7 +1470,8 @@ def _validate_dependabot_go_modules(
     texts: dict[str, tuple[str | None, str | None]],
     http_get: cooldown.HttpGet,
     now: datetime,
-) -> None:
+) -> tuple[str, set[str]]:
+    """Validate a Go module update; return its module root and changed modules."""
     for change in changes:
         _require(
             change.path in GO_MODULE_FILES,
@@ -1467,7 +1496,7 @@ def _validate_dependabot_go_modules(
     )
     base_mod, head_mod = texts[go_mod]
     _require(base_mod is not None and head_mod is not None, f"{go_mod} content is missing")
-    _validate_go_mod_change(base_mod, head_mod, http_get, now)
+    return root, _validate_go_mod_change(base_mod, head_mod, http_get, now)
 
 
 def _validate_dependabot_docker(
@@ -1561,8 +1590,108 @@ def _detect_normal_update_signal(pr: dict) -> str | None:
     return DEPENDABOT_BODY_SIGNAL
 
 
+def _parse_updated_dependencies(message: str) -> list[dict[str, str]]:
+    """Parse the ``updated-dependencies`` front matter of a Dependabot commit.
+
+    Only the exact shape Dependabot writes is accepted. Anything else, including
+    the cut-off block GitHub keeps for very long commit messages, is rejected.
+    """
+    lines = message.split("\n")
+    starts = [
+        index for index, line in enumerate(lines) if line == "updated-dependencies:"
+    ]
+    _require(
+        len(starts) == 1,
+        "commit message has no single updated-dependencies block",
+    )
+    start = starts[0]
+    _require(
+        start > 0 and lines[start - 1] == "---",
+        "updated-dependencies block does not follow a --- line",
+    )
+    entries: list[dict[str, str]] = []
+    for line in lines[start + 1:]:
+        if line == "...":
+            break
+        if line.startswith("- "):
+            entries.append({})
+        else:
+            _require(
+                line.startswith("  ") and bool(entries),
+                f"malformed updated-dependencies line: {_safe(line)}",
+            )
+        key, separator, value = line[2:].partition(": ")
+        _require(
+            separator == ": "
+            and key in _UPDATED_DEPENDENCY_KEYS
+            and bool(value)
+            and value == value.strip(),
+            f"malformed updated-dependencies line: {_safe(line)}",
+        )
+        _require(
+            key not in entries[-1],
+            f"duplicate updated-dependencies key {_safe(key)}",
+        )
+        entries[-1][key] = value
+    else:
+        raise Ineligible(
+            "updated-dependencies block is not terminated (truncated message?)"
+        )
+    _require(bool(entries), "updated-dependencies block is empty")
+    return entries
+
+
+def _check_go_group_signal(
+    head_ref: str,
+    message: str,
+    root: str,
+    changed_modules: set[str],
+    config_text: str,
+) -> str:
+    """Return the group signal for a verified Go version-update group PR."""
+    group = GO_VERSION_UPDATE_GROUPS[root]
+    directory = "" if root == "." else f"{root}/"
+    branch_re = rf"dependabot/go_modules/{re.escape(directory + group)}-[0-9a-f]{{10}}"
+    _require(
+        re.fullmatch(branch_re, head_ref) is not None,
+        f"branch {_safe(head_ref)} is not the {group} group branch",
+    )
+    # A security-update group could reuse a name; refuse any such config.
+    _require(
+        "applies-to" not in config_text and "security-updates" not in config_text,
+        f"trusted {DEPENDABOT_CONFIG_FILE} configures security-update groups",
+    )
+    group_key_re = rf"^\s+{re.escape(group)}:\s*$"
+    _require(
+        re.search(group_key_re, config_text, re.MULTILINE) is not None,
+        f"trusted {DEPENDABOT_CONFIG_FILE} does not define group {group}",
+    )
+    names: set[str] = set()
+    for entry in _parse_updated_dependencies(message):
+        name = entry.get("dependency-name")
+        _require(name is not None, "updated-dependencies entry has no dependency-name")
+        _require(name not in names, f"{_safe(name)} is listed twice")
+        names.add(name)
+        _require(
+            entry.get("dependency-group") == group,
+            f"{_safe(name)} is not in the {group} group",
+        )
+        _require(
+            entry.get("update-type") in GROUP_UPDATE_TYPES,
+            f"{_safe(name)} update-type {_safe(entry.get('update-type'))} "
+            "is not minor or patch",
+        )
+        _require(
+            name in changed_modules,
+            f"{_safe(name)} is listed but not upgraded in go.mod",
+        )
+    return DEPENDABOT_GROUP_SIGNAL
+
+
 def _check_dependabot_update_kind(
-    pr: dict, calibrated_signals: frozenset[str] | set[str]
+    pr: dict,
+    calibrated_signals: frozenset[str] | set[str],
+    group_signal: str | None = None,
 ) -> None:
     _require(not _has_security_label(pr), "PR carries a security label")
     body = pr.get("body")
@@ -1571,7 +1700,7 @@ def _check_dependabot_update_kind(
         not _has_security_markers(body),
         "Dependabot PR body contains security-update metadata",
     )
-    signal = _detect_normal_update_signal(pr)
+    signal = group_signal or _detect_normal_update_signal(pr)
     _require(
         signal is not None,
         "no positive signal that this is an ordinary version update; "
@@ -1580,7 +1709,9 @@ def _check_dependabot_update_kind(
     _require(
         signal in calibrated_signals,
         "PR body cannot distinguish version and security updates; "
-        "manual review required",
+        "manual review required"
+        if signal == DEPENDABOT_BODY_SIGNAL
+        else f"update-kind signal {signal} is not enabled; manual review required",
     )
 
 
@@ -1690,7 +1821,7 @@ def _validate_toolchain_changes(
 
 def _collect_changes(
     client: GitHubGetter, ctx: EventContext, pr: dict, commits: list[dict]
-) -> tuple[str, list[ChangedFile]]:
+) -> tuple[str, dict[str, tuple[str, str]], list[ChangedFile]]:
     base_sha = pr["base"]["sha"]
     compare = _require_dict(
         client.get(f"/repos/{ctx.repo}/compare/{base_sha}...{ctx.head_sha}"),
@@ -1709,7 +1840,7 @@ def _collect_changes(
     base_tree = _fetch_tree(client, ctx.repo, merge_base_sha)
     head_tree = _fetch_tree(client, ctx.repo, ctx.head_sha)
     changes = _diff_trees(base_tree, head_tree)
-    return merge_base_sha, changes
+    return merge_base_sha, base_tree, changes
 
 
 def _verify(
@@ -1725,7 +1856,7 @@ def _verify(
     _check_required_workflows(client, ctx)
     _check_required_checks(client, ctx)
     commits = _check_identity_and_commits(client, ctx, pr)
-    merge_base_sha, changes = _collect_changes(client, ctx, pr, commits)
+    merge_base_sha, base_tree, changes = _collect_changes(client, ctx, pr, commits)
     _check_sensitive_paths(changes)
 
     author = pr["user"]["login"]
@@ -1745,13 +1876,30 @@ def _verify(
         else:  # pragma: no cover - _parse_dependabot_ecosystem already rejects
             raise Ineligible("unsupported ecosystem")
         texts = _texts_for(changes, set(paths), client, ctx.repo, blob_cache)
+        group_signal = None
         if ecosystem == "go_modules":
-            _validate_dependabot_go_modules(changes, texts, http_get, now)
+            root, changed_modules = _validate_dependabot_go_modules(
+                changes, texts, http_get, now
+            )
+            message = commits[-1]["raw"]["commit"].get("message")
+            if isinstance(message, str) and "dependency-group:" in message:
+                _require(len(commits) == 1, "grouped update must be a single commit")
+                config_entry = base_tree.get(DEPENDABOT_CONFIG_FILE)
+                _require(
+                    config_entry is not None,
+                    f"merge base has no {DEPENDABOT_CONFIG_FILE}",
+                )
+                config_text = _fetch_blob_text(
+                    client, ctx.repo, config_entry[1], blob_cache
+                )
+                group_signal = _check_go_group_signal(
+                    pr["head"]["ref"], message, root, changed_modules, config_text
+                )
         elif ecosystem == "docker":
             _validate_dependabot_docker(changes, texts, http_get, now)
         else:
             _validate_dependabot_pip(changes, texts, http_get, now)
-        _check_dependabot_update_kind(pr, calibrated_signals)
+        _check_dependabot_update_kind(pr, calibrated_signals, group_signal)
     elif author == UPDATER_AUTHOR:
         _require(pr["commits"] == 1, "toolchain update must be a single commit")
         main_sha = _current_main_sha(client, ctx.repo)

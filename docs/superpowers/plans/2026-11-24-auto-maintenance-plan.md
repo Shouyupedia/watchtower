@@ -328,12 +328,19 @@ python -I -m unittest discover -s .github/scripts -v
     - 已核实 Dependabot 识别 `/tools` 依赖并开启多条升级 PR（#17–#26、#28–#33 等）。
     - #19、#24、#32、#33 均由维护者账号合并；近期 `Automerge` 运行（如 `45743494426`）中 `Verify automerge eligibility` 成功、`Merge verified pull request` 为 `skipped`。4.1a 的离线复核表明正文信号无法区分普通更新与安全更新，当前白名单为空，普通更新的机器人合并仍需取得与 PR head SHA 绑定的可信证据。
     - GitHub Actions PR、安全更新 PR 与 `pip` PR（`--hash` 格式）待后续观察。
+    - **2026-11-26 版本更新开启后**：
+      - 根目录作业记录了 `security-updates-only: false`，并生成分组 PR #36（`go-minor-patch`）。它的原始 head `2218e649` 由 Dependabot 签名，元数据列出 9 个模块，均属该组，update-type 均为 minor 或 patch。go.mod 中另有 12 个传递依赖连带升级，元数据未列出。
+      - #36 删除了 11 个基线标为 `// indirect` 的模块，促成了 #35 中的间接依赖删除规则。#36 后来被维护者 force-push 为无签名提交 `6f87cb6` 再合并，所以签名样本应以 `2218e649` 为准。
+      - `/tools` 作业因若干 `go-openapi/*` 包 `dependency_file_not_resolvable` 而失败，但仍生成分组 PR #37（178 项更新）。#37 的提交信息在 65536 字符处被截断，元数据只列出前 32 项，其中 1 项为 semver-major。它与 `main` 冲突，因此没有触发 CI。
+      - 现有 10 个逐包 PR 的签名提交都不带 `dependency-group`。
+      - 维护者确认 “Grouped security updates” 为关闭。
+      - 据此实现并启用 `dependabot-group-v1`（已加入 `CALIBRATED_NORMAL_UPDATE_SIGNALS`，`dependabot-body-v1` 仍保持禁用），规则见设计稿 §3「拒绝安全更新」。离线回放中，#36 的签名数据命中该信号，#37 因元数据截断被拒；线上自动合并效果待下一个 Go 分组 PR 观察。
 - [ ] 手动触发 `scheduled-release.yml`：固定 SHA → CI → tag → GoReleaser v2 → GHCR + 证明全链路通过。
   - **2026-11-26 状态**：`main` 上的 `dry_run=true` 托管彩排（run `45745244198`）已通过；待维护者确认后触发正式发布 `v1.0.1`（`dry_run=false`）验证全链路。
 - [ ] Actions 页确认 `go-toolchain-sync.yml` 与 `scheduled-release.yml` 为 `active`；把"60 天无活动会被停用"写进你的日历提醒（`scheduled-release` 本身不产生活动，合入频繁时自然续期，但无新提交时需要关注）。
   - **2026-11-26 已核实**：`gh workflow list --all` 确认 `Go Toolchain Sync` 与 `Scheduled release` 均为 `active`；日历提醒待维护者自行设置。
 - [ ] 负面验收：用一个测试 PR（改一行文档）确认**非机器人 PR 不会被自动合并**；用无 admin 权限的身份开 PR，确认无法绕过 `main-review`。
-  - **2026-11-26 已核实（前半项）**：PR #35（`b4b30c5`，仅改计划文档）在 `Pull Request`（run `45749026165`）与 `CodeQL`（run `45749025947`）全绿后触发 `Automerge`（run `45749585531`），`Verify automerge eligibility` 明确输出 `automerge verify: eligible=false: author Shouyupedia is not allowed`，`Merge verified pull request` 为 `skipped`，PR 保持 `OPEN`。后半项（无 admin 权限身份无法绕过 `main-review`）待验收。
+  - **2026-11-26 已核实（前半项）**：PR #35（`b4b30c5`，仅改计划文档）在 `Pull Request`（run `45749026165`）与 `CodeQL`（run `45749025947`）全绿后触发 `Automerge`（run `45749585531`），`Verify automerge eligibility` 明确输出 `automerge verify: eligible=false: author Shouyupedia is not allowed`，`Merge verified pull request` 为 `skipped`，PR 保持 `OPEN`，随后由维护者手动合并（2026-11-26，合并提交 `ccd47f7`）。后半项（无 admin 权限身份无法绕过 `main-review`）待验收。
 
 ## 风险与回滚
 
@@ -347,3 +354,4 @@ python -I -m unittest discover -s .github/scripts -v
 | macOS runner 排队，阻塞 PR 合并、`:latest-dev` 与正式发布（维护者已决定保留阻塞） | 接受延迟；排队超时或被取消时重跑该任务，不以"排队中"视为通过；定时发布失败即停在不发布一侧，可用 `workflow_dispatch` 重试。**已发生（2026-11-24，PR #11）**：macOS arm64 容量不足，任务未分到机器，15 分钟后被取消并使检查显示失败。无人值守的自动合并与定时发布会因此停住；PR 5 前需决定是否自动重跑，或改用其他 macOS runner 标签 |
 | macOS 二进制未做 Developer ID 签名与公证，被 Gatekeeper 拦截 | 已接受（4b.5）；文档说明与来源证明校验 |
 | 60 天无活动停用定时工作流 | M3 巡检提醒 |
+| 有人打开仓库设置 “Grouped security updates”，安全更新可能带上组名（校验器读不到该设置） | 打开前先把 `dependabot-group-v1` 移出 `CALIBRATED_NORMAL_UPDATE_SIGNALS`；`dependabot.yml` 中出现 `applies-to` 或 `security-updates` 时，校验器自动拒绝 |

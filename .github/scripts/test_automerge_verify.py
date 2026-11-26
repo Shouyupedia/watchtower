@@ -759,8 +759,14 @@ class ConstantsTests(AutomergeTestCase):
     def test_required_workflow_names_and_paths(self) -> None:
         self.assertEqual(av.REQUIRED_WORKFLOWS, EXPECTED_REQUIRED_WORKFLOWS)
 
-    def test_calibrated_signals_are_intentionally_empty(self) -> None:
-        self.assertEqual(av.CALIBRATED_NORMAL_UPDATE_SIGNALS, frozenset())
+    def test_calibrated_signals_only_enable_group_signal(self) -> None:
+        self.assertEqual(
+            av.CALIBRATED_NORMAL_UPDATE_SIGNALS,
+            frozenset({GROUP_SIGNAL}),
+        )
+        self.assertNotIn(
+            av.DEPENDABOT_BODY_SIGNAL, av.CALIBRATED_NORMAL_UPDATE_SIGNALS
+        )
         self.assertEqual(av.DEPENDABOT_BODY_SIGNAL, SIGNAL)
 
     def test_allowed_authors_and_ecosystems(self) -> None:
@@ -1489,10 +1495,10 @@ class SensitivePathTests(AutomergeTestCase):
 
 
 class DependabotSignalTests(AutomergeTestCase):
-    def test_default_calibration_rejects_every_dependabot_pr(self) -> None:
+    def test_default_calibration_rejects_ungrouped_dependabot_pr(self) -> None:
         scenario = Scenario()
-        # Do not pass calibrated_signals at all: the module default (empty) is
-        # the behaviour under test.
+        # Do not pass calibrated_signals at all: the module default only
+        # enables the group signal, so body-only PRs stay rejected.
         decision = scenario.verify_with_module_defaults()
         self.assertRejected(
             decision, "body cannot distinguish version and security updates"
@@ -1865,6 +1871,142 @@ class GoModulesTests(AutomergeTestCase):
                 scenario = Scenario()
                 scenario.set_head_file("go.mod", text)
                 self.assertRejected(scenario.verify(), reason)
+
+
+GROUP = "go-minor-patch"
+GROUP_SIGNAL = "dependabot-group-v1"
+GROUP_BRANCH = f"dependabot/go_modules/{GROUP}-0123456789"
+GROUP_CONFIG = (
+    "version: 2\nupdates:\n"
+    '  - package-ecosystem: "gomod"\n    directory: "/"\n'
+    '    schedule:\n      interval: "weekly"\n'
+    f'    groups:\n      {GROUP}:\n        update-types:\n          - "minor"\n'
+)
+
+
+def group_commit_message(entries) -> str:
+    lines = [f"chore(deps): bump the {GROUP} group", "", "---", "updated-dependencies:"]
+    for name, update_type, group in entries:
+        lines += [
+            f"- dependency-name: {name}",
+            "  dependency-version: 1.2.4",
+            "  dependency-type: direct:production",
+            f"  update-type: {update_type}",
+            f"  dependency-group: {group}",
+        ]
+    lines += ["...", "", "Signed-off-by: dependabot[bot] <support@github.com>", ""]
+    return "\n".join(lines)
+
+
+class GroupSignalTests(AutomergeTestCase):
+    def group_scenario(
+        self,
+        *,
+        message=None,
+        config: str = GROUP_CONFIG,
+        branch: str = GROUP_BRANCH,
+    ) -> Scenario:
+        scenario = Scenario()
+        scenario.base_files[".github/dependabot.yml"] = config
+        scenario.head_files[".github/dependabot.yml"] = config
+        scenario.rebuild()
+        scenario.set_head_branch(branch)
+        if message is None:
+            message = group_commit_message(
+                [("example.com/mod", "version-update:semver-patch", GROUP)]
+            )
+        scenario.commits[0]["commit"]["message"] = message
+        return scenario
+
+    def test_signed_group_update_is_eligible_by_default_and_gated(self) -> None:
+        scenario = self.group_scenario()
+        decision = scenario.verify_with_module_defaults()
+        self.assertEligible(decision, pr_number=42, head_sha=HEAD_SHA)
+        self.assertRejected(
+            scenario.verify(signals=CALIBRATED),
+            "update-kind signal dependabot-group-v1 is not enabled",
+        )
+
+    def test_group_metadata_must_match_trusted_group_and_diff(self) -> None:
+        patch = "version-update:semver-patch"
+        # GitHub cuts very long messages off mid-entry, dropping the terminator.
+        truncated = group_commit_message([("example.com/mod", patch, GROUP)]).replace(
+            "\n...\n", "\n- dependency-na...\n"
+        )
+        cases = {
+            "truncated": (truncated, "malformed updated-dependencies line"),
+            "other-group": (
+                group_commit_message([("example.com/mod", patch, "other")]),
+                "example.com/mod is not in the go-minor-patch group",
+            ),
+            "major": (
+                group_commit_message(
+                    [("example.com/mod", "version-update:semver-major", GROUP)]
+                ),
+                "is not minor or patch",
+            ),
+            "not-upgraded": (
+                group_commit_message(
+                    [
+                        ("example.com/mod", patch, GROUP),
+                        ("example.com/untouched", patch, GROUP),
+                    ]
+                ),
+                "example.com/untouched is listed but not upgraded in go.mod",
+            ),
+        }
+        for name, (message, reason) in cases.items():
+            with self.subTest(case=name):
+                scenario = self.group_scenario(message=message)
+                self.assertRejected(
+                    scenario.verify(signals=frozenset({GROUP_SIGNAL})), reason
+                )
+
+    def test_group_branch_and_config_must_be_trusted(self) -> None:
+        security_config = GROUP_CONFIG + '        applies-to: "security-updates"\n'
+        cases = {
+            "tools-branch": (
+                {"branch": f"dependabot/go_modules/tools/{GROUP}-0123456789"},
+                "is not the go-minor-patch group branch",
+            ),
+            "security-group-config": (
+                {"config": security_config},
+                "configures security-update groups",
+            ),
+            "missing-group": (
+                {"config": "version: 2\nupdates: []\n"},
+                "does not define group go-minor-patch",
+            ),
+        }
+        for name, (kwargs, reason) in cases.items():
+            with self.subTest(case=name):
+                scenario = self.group_scenario(**kwargs)
+                self.assertRejected(
+                    scenario.verify(signals=frozenset({GROUP_SIGNAL})), reason
+                )
+
+    def test_group_update_must_be_a_single_commit(self) -> None:
+        scenario = self.group_scenario()
+        message = scenario.commits[0]["commit"]["message"]
+        scenario.pr["commits"] = 2
+        scenario.commits = [
+            make_commit(MIDDLE_COMMIT_SHA, MAIN_SHA, DEPENDABOT),
+            make_commit(HEAD_SHA, MIDDLE_COMMIT_SHA, DEPENDABOT),
+        ]
+        scenario.commits[-1]["commit"]["message"] = message
+        self.assertRejected(
+            scenario.verify(signals=frozenset({GROUP_SIGNAL})),
+            "grouped update must be a single commit",
+        )
+
+    def test_security_label_still_vetoes_group_update(self) -> None:
+        scenario = self.group_scenario()
+        for pr in (scenario.pr, scenario.final_pr, *scenario.pulls):
+            pr["labels"] = [{"name": "security"}]
+        self.assertRejected(
+            scenario.verify(signals=frozenset({GROUP_SIGNAL})),
+            "PR carries a security label",
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -111,7 +111,14 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
      - **必需检查全绿**：查询本仓库关联到该 PR 同一个 `head_sha` 的 `Pull Request` 工作流与 `CodeQL`（`event == "pull_request"`）工作流运行记录，确认两者均已完成且结论为 `success`，同时查询 `head_sha` 上的必需 check-runs 状态全部通过（若另一工作流仍在运行则本次静默退出，待最后完成的工作流触发时再合入）。
      - **可信机器人身份绑定**：`pr.user.login` 仅允许 `dependabot[bot]` 或 `watchtower-updater[bot]`，**绝不凭分支名、PR 标签或通用 `github-actions[bot]` 放行**。
      - **完整提交列表与签名校验**：分页拉取 PR 的全部提交并核对条数等于 `pr.commits`；要求每一个提交都满足 `commit.verification.verified == true`、`author.login` 等于该 PR 作者机器人，且 `committer.login` 仅限 `web-flow` 或该机器人本身。**禁止调用 `update-branch` 向自动 PR 注入合并提交**（否则会引入非机器人提交破坏签名链）。
-     - **拒绝安全更新（含校准边界）**：核查 PR 不关联 Dependabot 安全告警，也不带 security 相关标签或安全更新元数据，且必须命中经过真实样本校准的普通更新正向信号。4.1a 真实样本回放表明，两类更新均能命中 `dependabot-body-v1`。在只读校验器能将普通更新的来源绑定到具体 PR 和提交前，`CALIBRATED_NORMAL_UPDATE_SIGNALS` 保持为空，Dependabot PR 转人工审核。
+     - **拒绝安全更新（含校准边界）**：核查 PR 不关联 Dependabot 安全告警，也不带 security 相关标签或安全更新元数据，且必须命中经过真实样本校准的普通更新正向信号。4.1a 真实样本回放表明，两类更新均能命中 `dependabot-body-v1`，因此正文信号绝不加入白名单，所有逐包 Dependabot PR 继续转人工审核。当前 `CALIBRATED_NORMAL_UPDATE_SIGNALS` 仅启用 `dependabot-group-v1`，它只适用于 `go_modules`，读取 head 上唯一签名提交里的 `updated-dependencies` 元数据，并要求同时满足以下条件：
+       - 元数据块完整，没有被截断。
+       - 每个条目都属于该模块根目录对应的版本更新组（`/` 对应 `go-minor-patch`，`/tools` 对应 `tools-minor-patch`，对应关系写死在校验器中），`update-type` 只能是 minor 或 patch，且条目列出的模块必须在 `go.mod` 中实际升级。
+       - 反过来不作要求：Dependabot 不会在元数据中列出连带升级的传递依赖，因此 `go.mod` 中升级了但元数据未列出的模块不会导致拒绝。这些模块仍须通过 `go.mod` 的升级规则和冷却期核验。
+       - 分支名与组名、目录严格一致。
+       - merge base 上的 `dependabot.yml` 中有以该组名为键的行，且全文不出现 `applies-to` 或 `security-updates`。校验器只做这两项文本检查，不解析该组属于哪个生态或目录；组与目录的对应由上一条的分支名和写死的对应关系保证。
+
+       label 和正文的安全否决条件仍然有效。**运维不变量**：这个信号成立的前提是仓库设置 “Grouped security updates” 保持关闭（2026-11-26 维护者确认为关闭；API 不暴露该开关）。打开该开关前，必须先把这个信号移出白名单。
      - **敏感路径硬禁区**：PR 修改的文件列表中绝对禁止出现 `.github/workflows/**`、`.github/actions/**`、`.github/scripts/**`、`.github/CODEOWNERS`、`.github/dependabot.yml`（及任意路径下的 `CODEOWNERS`、`dependabot.yml`、`dependabot.yaml`）。
      - **按机器人与生态执行精确文件及行级 diff 白名单**：
        - **当作者为 `dependabot[bot]` 时**，从 `head.ref` 前缀解析生态，仅允许 `go_modules`、`docker`、`pip`（`github_actions` 永远返回 `eligible=false`）：
@@ -256,7 +263,7 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
 
 - **Ruleset 与合并方式（M2，`d3484b7`）**：`main-checks`（ID `28051307`，`active`，零豁免）将 `allowed_merge_methods` 限定为 `["merge"]`，`main-review`（ID `28051631`，`active`）将 `watchtower-automerge`（Integration `5915895`）与 `Repository admin` 列为 `pull_request` 绕过项。`automerge.yml` 相应使用单次 `sha` 保护的 `PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge`（`merge_method=merge`），保持 HTTP 405/409 非重试正常退出语义不变。
 - **Go 冷却期索引实测（4.2）**：`cooldown.go_first_seen` 在 10 次请求预算内（1 次 `proxy.golang.org` `.info` 提示 + 最多 9 页 `index.golang.org/index`、每页 2000 条）实测约命中 6/12 个 Go 模块样本，且 `golang.org/toolchain` 样本未命中。按 fail-closed 原则，凡在预算内未命中的版本会使对应依赖更新 PR 留在人工审核，并阻止该次 `go-toolchain-sync.yml` 创建/更新工具链同步 PR（亦使 `automerge.yml` 对该版本返回 `eligible=false`）。
-- **Dependabot 普通与安全更新校准（2026-11-26）**：离线复核真实样本后确认，普通更新与安全更新可以使用完全相同的 PR 正文结构与标签，正文信号不能区分更新类型。生产白名单保持为空，Dependabot PR 转人工审核；样本来源不在公开文档中记录。
+- **Dependabot 普通与安全更新校准（2026-11-26）**：离线复核真实样本后确认，普通更新与安全更新可以使用完全相同的 PR 正文结构与标签，正文信号不能区分更新类型，绝不加入白名单；样本来源不在公开文档中记录。在维护者确认仓库设置 “Grouped security updates” 保持关闭后，白名单仅启用针对 Go 分组版本更新的 `dependabot-group-v1`，其余 Dependabot PR（含逐包更新与非 Go 生态）继续转人工审核。
 - **PyPI 与 Docker 冷却期**：PyPI 核验覆盖锁文件中该包该版本所有允许的 `--hash=sha256:...` 并取最晚 `upload_time_iso_8601`（任一缺失即 fail-closed）；Docker 核验对缺失 `tag_last_pushed` 或 digest 不匹配一律 fail-closed。
 - **相对初版设计的 0.1 实施偏离**：`go tool -modfile=tools/go.mod` 用于 `staticcheck`/`goreleaser`/`actionlint`，`govulncheck` 改由 `scripts/run-govulncheck.sh` 经 `go build -modfile=tools/go.mod` 扫描各目标；新增最小范围 `.gitattributes`；`tools/go.mod` 增补 `actionlint`；校验与同步逻辑落地在 `.github/scripts/`（Python 标准库 + 单元测试）并将 `.github/scripts/**` 列入敏感路径硬禁区。
 
