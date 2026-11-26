@@ -75,7 +75,7 @@ As an alternative to running the container image, macOS binary archives are incl
 - `watchtower_darwin_arm64.tar.gz` for Apple Silicon Macs
 - `watchtower_darwin_amd64.tar.gz` for Intel Macs
 
-Both archives contain the `watchtower` executable and `LICENSE.md`. The binaries require **macOS 12 Monterey or newer**, the minimum supported by the Go 1.26 toolchain used for these builds (see the [Go 1.26 release notes](https://go.dev/doc/go1.26)). This minimum follows the Go toolchain: Go 1.27 and later will require macOS 13 Ventura or newer.
+Both archives contain the `watchtower` executable and `LICENSE.md`. The binaries require **macOS 13 Ventura or newer**, the minimum supported by the Go 1.27 toolchain used for these builds (see the [Go 1.27 release notes](https://go.dev/doc/go1.27)). This minimum follows the Go toolchain, so a future Go upgrade can raise it again. Releases built with Go 1.26 (up to and including `v1.0.0`) still run on macOS 12 Monterey.
 
 Releases published by the automated release pipeline will include a GitHub build provenance attestation; that pipeline is being added in PR 5, so existing releases (including `v1.0.0`) do not have one yet. When an attestation is available, verify it before extracting the archive:
 
