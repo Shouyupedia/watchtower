@@ -1,8 +1,8 @@
 # 自动维护实施计划
 
-日期：2026-11-24
+日期：2026-11-24（进度更新：2026-11-26）
 依据：`docs/superpowers/specs/2026-11-17-auto-maintenance-design.md`（状态：已修订，待批准）
-状态：草案，待维护者确认
+状态：执行中（PR 1–5 已合入 `main`，M3 端到端验收进行中）
 
 ## 0. 总体策略
 
@@ -11,7 +11,7 @@
   1. 必需检查的名字只有在 PR 3 的工作流真实跑过一次后才能确定，所以 **Ruleset 必须在 PR 3 合入之后创建**。
   2. `automerge.yml` 一旦合入 `main` 就生效，所以它必须在 **Ruleset 已启用、两个 App 与 Environment 已就绪**之后才合入（PR 4）。
   3. 发布流水线（PR 5）会推 GHCR `:latest`，被所有宿主机拉取，必须最后上线，且先彩排（见 PR 5）。
-- 现状下仓库没有 Ruleset，PR 1–3 可以直接由管理员合并；PR 4、4b、5 合并时已受 Ruleset 约束，使用方法 B 的管理员 `For pull requests only` 绕过审批（检查必须全绿，零豁免）。
+- PR 1–3 在 Ruleset 创建前由管理员直接合并；M2 已启用 `main-checks` 与 `main-review`，PR 4、4b、5 及后续维护者自提 PR 均受 Ruleset 约束，使用方法 B 的管理员 `For pull requests only` 绕过审批（检查必须全绿，零豁免）。
 - 每个 PR 用 `claude/*` 或 `chore/auto-maint-N-*` 分支，PR 描述附验证输出。**所有提交与推送由维护者确认后再做**，本计划不自动提交。
 
 | 阶段 | 内容 | 依赖 | 谁做 | 状态 |
@@ -21,10 +21,10 @@
 | PR 3 | 只读 CI 体系、可信镜像发布基础、Dependabot、CodeQL/文档工作流 | PR 2 | 实现者 | 已合并（#12） |
 | M1 | 建 2 个 GitHub App、2 个 Environment、安全设置 | 可与 PR 1–3 并行 | 维护者 | 已完成（2026-11-25） |
 | M2 | 创建 `main-checks`、`main-review` Ruleset | PR 3 合入并跑过 | 维护者 | 已完成（2026-11-25） |
-| PR 4 | `automerge.yml`、`go-toolchain-sync.yml` 及其校验脚本 | M1、M2 | 实现者 | 待推进 |
-| PR 4b | macOS 发布目标（`darwin/amd64`、`darwin/arm64`），发布契约 6 → 8 个归档 | PR 4 | 实现者 | 待推进 |
-| PR 5 | `release.yml`、`scheduled-release.yml`、证明与 SBOM | PR 4b | 实现者 | 待推进 |
-| M3 | 端到端验收 | 全部 | 维护者 + 实现者 | 待推进 |
+| PR 4 | `automerge.yml`、`go-toolchain-sync.yml` 及其校验脚本 | M1、M2 | 实现者 | 已合并（#14）；真实样本已排除正文信号，正向自动合并待验收 |
+| PR 4b | macOS 发布目标（`darwin/amd64`、`darwin/arm64`），发布契约 6 → 8 个归档 | PR 4 | 实现者 | 已合并（#27，原 #15 合入堆叠分支后重提） |
+| PR 5 | `release.yml`、`scheduled-release.yml`、证明与 SBOM | PR 4b | 实现者 | 已合并（#34，原 #16 合入堆叠分支后重提）；dry-run 托管彩排已通过（`45745244198`），首次正式发布待触发 |
+| M3 | 端到端验收 | 全部 | 维护者 + 实现者 | 进行中 |
 
 ## 0.1 开始前需要你决定的 4 件事（有默认值，不回复则按默认）
 
@@ -199,9 +199,9 @@ git ls-remote ... # 每个 uses SHA 与版本 tag 逐一核对（可写成 scrip
 
 ## PR 4：自动合并与 Go 工具链同步
 
-分支：`chore/auto-maint-4-automerge`。**此 PR 合入后 `automerge.yml` 立即在 `main` 上生效**，所以整个判定逻辑必须先离线测试到位。
+分支：`chore/auto-maint-4-automerge`。**已合并（#14，2026-11-25）**；离线单测（243 通过）、离线回放、actionlint 与 zizmor 已通过，4.1a 真实样本校准与线上自动合并验收延至 M3。
 
-- [ ] **4.1 测试先行：`.github/scripts/automerge_verify.py` 与 `.github/scripts/test_automerge_verify.py`**（纯函数 + 可注入的 HTTP/GitHub 客户端，标准库）。每条"反目标"和白名单规则对应至少一个**拒绝用例**，任何输入缺失都必须返回 `eligible=false`：
+- [x] **4.1 测试先行：`.github/scripts/automerge_verify.py` 与 `.github/scripts/test_automerge_verify.py`**（纯函数 + 可注入的 HTTP/GitHub 客户端，标准库）。每条"反目标"和白名单规则对应至少一个**拒绝用例**，任何输入缺失都必须返回 `eligible=false`：
   - 事件与绑定：非 `pull_request` 事件、非本仓库 head、PR 非 open/是 draft、`head.sha` 与 `workflow_run.head_sha` 不一致、找到 0 个或多于 1 个 PR。
   - 必需检查：`Pull Request` 或 `CodeQL` 缺失/未完成/失败，另一个仍在运行（静默退出）。
   - 身份与提交：作者不是 `dependabot[bot]`/`watchtower-updater[bot]`；提交数 ≠ `pr.commits`；存在未验证签名、作者不符、committer 不是 `web-flow` 或该机器人本身的提交；存在合并提交。
@@ -218,22 +218,24 @@ git ls-remote ... # 每个 uses SHA 与版本 tag 逐一核对（可写成 scrip
   - 找出只读任务**可靠**的区分信号（分支名、PR 正文固定段落、标签、提交元数据、Dependabot alerts API 是否对只读令牌可用等），并为每一类信号写正反用例。
   - **证据不足的处理**：只要无法确定一个 PR 不是安全更新（信号缺失、结构异常、API 不可读），一律 `eligible=false` 转人工；宁可让普通更新多走一次人工审核，也不能让安全更新自动合并。
   - 通过标准：真实普通更新样本 → 判定为普通；真实安全更新样本 → `eligible=false`；缺字段样本 → `eligible=false`。
-  - **PR 4 实测与校准边界（2026-11-25）**：仓库尚未产生真实 Dependabot 普通更新与安全更新成对样本，`.github/scripts/fixtures/` 中的 Dependabot 与工具链夹具均为手工合成夹具（仅 `human_pr13_replay.json` 为脱敏后的真实人工 PR #13 离线回放样本）；因此 `automerge_verify.py` 的 `CALIBRATED_NORMAL_UPDATE_SIGNALS` 保持有意为空（`frozenset()`），所有 Dependabot PR 均 fail-closed（`eligible=false`）转人工审核，待 M3 采集真实成对样本校准后再启用正向信号。
-- [ ] **4.2 实现冷却期查询**：
+  - **2026-11-26 部分完成：真实样本校准**。离线复核真实样本后确认：Dependabot 的普通更新与安全更新可以使用完全相同的正文结构与标签，正文信号不能作为区分依据，因此不加入白名单。样本来源与逐条证据只保留在本地校准记录，不写入公开文档。
+  - 另一个候选方向是分组更新（已验证签名提交中的 `dependency-group` 元数据）。它对安全更新同样适用，还需校验受信任配置中的组用途和实际改动目录；单个外部样本不足以放行本仓库的 Go、Docker 或 pip 更新。
+  - **正向自动合并仍待验收**：在取得可绑定到具体 PR 与 head SHA 的普通更新凭据前，Dependabot PR 继续转人工审核，上方通过标准尚未满足。
+- [x] **4.2 实现冷却期查询**：
   - Go 模块：读 `https://index.golang.org/index?since=...` 查询模块版本首次入库 `Timestamp`；先**实测索引接口分页与按模块过滤能力**（它按时间排序、不支持按模块查询，需要评估扫描成本）。若无法在合理请求数内定位，则 fail-closed（`eligible=false`），并在 PR 描述中说明 Go 模块自动合并因此退化为人工审核，由你决定是否接受或另寻可信来源。**这是整个计划里最大的不确定点，先 spike 再继续。**
     - **4.2 实测结论（2026-11-25）**：`cooldown.go_first_seen` 仅将 `proxy.golang.org` 的 `.info` `Time` 作为前向扫描起点提示（`since = Time - 60s`），不将其当作可信发布时间；请求预算固定为 10 次（1 次 `.info` + 最多 9 页 `index.golang.org/index`，每页上限 2000 条）。实测样本中约 6/12 个 Go 模块命中，`golang.org/toolchain` 未在 10 次请求预算内命中。按 fail-closed 原则：未命中的 Go 模块升级 PR 判定 `eligible=false` 转人工审核；`go_toolchain_sync.py` 未命中时拒绝创建/更新工具链 PR（`needs_sync=False`），`automerge_verify.py` 亦判定 `eligible=false`（均未实现“首次观察起算”回退）。
   - Docker：Docker Hub `https://hub.docker.com/v2/repositories/library/golang/tags/<tag>` 的 `tag_last_pushed`，并核对 digest 与 PR 中一致（缺失或不匹配时 fail-closed）。
   - PyPI：`https://pypi.org/pypi/<pkg>/<version>/json` 的 `upload_time_iso_8601`（覆盖锁文件中该包该版本允许的每一个 `--hash`，取对应文件的**最晚**上传时间；任一 hash 缺失或无时间戳即 fail-closed，与 4.1 保持一致）。
-- [ ] **4.3 `automerge.yml`**：
+- [x] **4.3 `automerge.yml`**：
   - 触发：`workflow_run`（`["Pull Request","CodeQL"]`，`completed`）；顶层 `permissions: {}`；`concurrency` 按目标 PR 分组。
   - `verify`：`contents: read`、`pull-requests: read`、`checks: read`、`actions: read`；`actions/checkout` 显式 `ref: ${{ github.event.repository.default_branch }}` 检出 `main` 取脚本，**不检出 PR 代码、不下载 artifact**；`GITHUB_TOKEN` 只读；输出 `eligible`、`pr_number`、`head_sha`。
   - `merge`：`needs: verify`，`if: needs.verify.outputs.eligible == 'true'`，`environment: automerge`；`actions/create-github-app-token`（钉 SHA）签发令牌；`gh api -X PUT repos/{owner}/{repo}/pulls/<n>/merge -f sha=<head_sha> -f merge_method=merge`（对齐 M2 已生效的 `main-checks` Ruleset，见 `d3484b7`：`allowed_merge_methods: ["merge"]`）；单次带 `sha` 保护请求，**不调用 `update-branch`**；HTTP 405/409 视为正常结束，不重试。
   - 所有从事件载荷取的值经环境变量传递，**不直接内插进 `run:`**（zizmor 会检查）。
-- [ ] **4.4 `.github/scripts/go_toolchain_sync.py` + 测试**：
+- [x] **4.4 `.github/scripts/go_toolchain_sync.py` + 测试**：
   - 检查：`go.dev/dl/?mode=json` 最新稳定版、Docker Hub digest 与 `tag_last_pushed`、可信首次可见时间，均满 7 天才采用；已一致且无落后同步分支则退出。
   - 同次版本补丁：只改 `.go-version` 与 `dockerfiles/Dockerfile*`；跨次版本：额外改 `go.mod`、`tools/go.mod` 的 `go` 指令并跑 `go mod tidy`。
   - 提交：GraphQL `createCommitOnBranch`（`expectedHeadOid` 防并发），分支名固定 `automation/go-toolchain`，单提交；已有同名开放 PR 则更新该分支。`push → main` 触发时仅在该分支落后时重放。
-- [ ] **4.5 `go-toolchain-sync.yml`**：每周一 02:17 UTC + `push` → `main` + `workflow_dispatch`；检查任务只读；提 PR 任务绑定 `environment: updater`，用 `watchtower-updater` 令牌。
+- [x] **4.5 `go-toolchain-sync.yml`**：每周一 02:17 UTC + `push` → `main` + `workflow_dispatch`；检查任务只读；提 PR 任务绑定 `environment: updater`，用 `watchtower-updater` 令牌。
 - [x] **4.6 同步修订设计稿**：把 4.2 的实测结论与 0.1 的偏离写回设计稿（状态改为"已批准"由你决定）。
   - **2026-11-25 已同步至 `docs/superpowers/specs/2026-11-17-auto-maintenance-design.md`**：记录 M2 活跃 Ruleset 仅允许 `merge_method=merge`（单次 `sha` 保护请求、HTTP 405/409 不重试）、4.2 `index.golang.org` 10 次请求实测（~6/12 命中与 `golang.org/toolchain` 未命中导致依赖 PR 转人工且阻止工具链同步开 PR）、4.1a 合成夹具与空校准集使全部 Dependabot PR 暂转人工、PyPI 取全部允许 hash 最晚上传时间、Docker 独立核验 fail-closed，以及 0.1 各项偏离（`go tool`/`go build` 实测结果、最小 `.gitattributes`、`tools/go.mod` 增补 `actionlint`、`.github/scripts/` 与 `.github/scripts/**` 敏感路径硬禁区）。设计稿状态字段保持“已修订，待批准”交维护者决定。
 
@@ -250,7 +252,7 @@ python -I -m unittest discover -s .github/scripts -v     # 全部通过，且包
 
 ## PR 4b：macOS 发布目标
 
-分支：`chore/auto-maint-4b-macos`。
+分支：`chore/auto-maint-4b-macos`。**已合并（#27，2026-11-25；原 #15 误合入堆叠分支后重提）**；8 个归档契约、`govulncheck` 8 目标、`test (macos-latest)` 冒烟与文档均已合入 `main`。
 
 **维护者决定（2026-11-24）**：macOS 加入发布目标；`test (macos-latest)` 保留，并**继续阻塞**合并与发布。PR 2 的 2.5 节"恰好 6 个归档"是当时与 `v1.0.0` 对齐的契约，自本 PR 起由下面的 8 个归档取代；`windows/arm64` 仍然排除。
 
@@ -258,17 +260,17 @@ python -I -m unittest discover -s .github/scripts -v     # 全部通过，且包
 
 **已实测（2026-11-24，`3c20231`，go1.26.11，Windows 主机）**：`CGO_ENABLED=0` 下 `darwin/amd64` 与 `darwin/arm64` 均可交叉编译，仓库内没有平台专用 Go 文件。**尚未实测**：产物在 macOS 上的运行。
 
-- [ ] **4b.1 `goreleaser.yml`**：`targets` 增加 `darwin_amd64`、`darwin_arm64`，更新"六个目标"的注释。不做 universal binary。
+- [x] **4b.1 `goreleaser.yml`**：`targets` 增加 `darwin_amd64`、`darwin_arm64`，更新"六个目标"的注释。不做 universal binary。
   - 归档名为 `watchtower_darwin_amd64.tar.gz` 与 `watchtower_darwin_arm64.tar.gz`。现有 `name_template` 会把所有 `arm64` 写成 `arm64v8`，需改为仅 Linux 使用 `arm64v8`；**已有 6 个归档名不得变化**。
-- [ ] **4b.2 `scripts/check-release-contract.sh`**：归档 6 → 8、校验和 6 → 8 行（发布文件共 9 个），补 `target_dirs` 与 `archive_target_dir`（`darwin` 的目录名以 snapshot 实际输出为准），更新头部契约说明。
+- [x] **4b.2 `scripts/check-release-contract.sh`**：归档 6 → 8、校验和 6 → 8 行（发布文件共 9 个），补 `target_dirs` 与 `archive_target_dir`（`darwin` 的目录名以 snapshot 实际输出为准），更新头部契约说明。
   - 负面验证：缺任一 `darwin` 归档、多出 `windows_arm64`、`darwin` 归档内二进制与构建输出不一致，均须失败。
-- [ ] **4b.3 `scripts/run-govulncheck.sh`**：增加 `darwin/amd64/`、`darwin/arm64/`，共 8 个目标，更新头部注释。若出现 `darwin` 独有漏洞，按 2.4 的规则处理。
-- [ ] **4b.4 macOS 冒烟**：在 `ci.yml` 现有 `test` 任务内加仅 macOS 执行的步骤，**不新增任务、不改检查名**（M2 之后检查名已冻结）：按发布参数（`CGO_ENABLED=0`、相同 `ldflags`）构建 `darwin/arm64` 与 `darwin/amd64`，`file` 核对架构，`codesign -v` 核对 `arm64` 的 ad-hoc 签名，用不连接 Docker 的命令（`--help`）运行本机架构的二进制。
+- [x] **4b.3 `scripts/run-govulncheck.sh`**：增加 `darwin/amd64/`、`darwin/arm64/`，共 8 个目标，更新头部注释。若出现 `darwin` 独有漏洞，按 2.4 的规则处理。
+- [x] **4b.4 macOS 冒烟**：在 `ci.yml` 现有 `test` 任务内加仅 macOS 执行的步骤，**不新增任务、不改检查名**（M2 之后检查名已冻结）：按发布参数（`CGO_ENABLED=0`、相同 `ldflags`）构建 `darwin/arm64` 与 `darwin/amd64`，`file` 核对架构，`codesign -v` 核对 `arm64` 的 ad-hoc 签名，用不连接 Docker 的命令（`--help`）运行本机架构的二进制。
   - 先确认 `macos-latest` 的实际架构；能用 Rosetta 时再运行 `amd64`，不能则在 PR 描述写明 `amd64` 只验证了构建。
   - 若改动了行号，同步更新 `.github/zizmor.yml` 中按行号的豁免。
-- [ ] **4b.5 不做签名与公证（维护者已决定，2026-11-24）**：Developer ID 签名与公证需要付费 Apple Developer 账号，还会给发布任务增加长期密钥。产物只有 Go 链接器的 ad-hoc 签名，浏览器下载的文件会被 Gatekeeper 拦截；文档写明先用 `gh attestation verify` 校验（证明在 PR 5 提供），再由用户自行解除隔离。
-- [ ] **4b.6 文档**：补充 macOS 二进制的下载与运行说明，包括最低 macOS 版本（按 `.go-version` 对应的 Go 发行说明核对，跨次版本升级 Go 时复核），以及 Docker Desktop 的 socket 路径可能不是 `/var/run/docker.sock`、需设置 `DOCKER_HOST`（实测后再写）。
-- [ ] **4b.7 同步修订设计稿**：§5.1 第 4 条的目标平台改为 8 个归档（该处仍写"排除 `windows/arm`"，一并更正为同时排除 `windows/arm64`），§7 验证清单同步加入 macOS。
+- [x] **4b.5 不做签名与公证（维护者已决定，2026-11-24）**：Developer ID 签名与公证需要付费 Apple Developer 账号，还会给发布任务增加长期密钥。产物只有 Go 链接器的 ad-hoc 签名，浏览器下载的文件会被 Gatekeeper 拦截；文档写明先用 `gh attestation verify` 校验（证明在 PR 5 提供），再由用户自行解除隔离。
+- [x] **4b.6 文档**：补充 macOS 二进制的下载与运行说明，包括最低 macOS 版本（按 `.go-version` 对应的 Go 发行说明核对，跨次版本升级 Go 时复核），以及 Docker Desktop 的 socket 路径可能不是 `/var/run/docker.sock`、需设置 `DOCKER_HOST`（实测后再写）。
+- [x] **4b.7 同步修订设计稿**：§5.1 第 4 条的目标平台改为 8 个归档（该处仍写"排除 `windows/arm`"，一并更正为同时排除 `windows/arm64`），§7 验证清单同步加入 macOS。
 
 **PR 4b 验收**
 
@@ -285,25 +287,27 @@ go tool -modfile=tools/go.mod actionlint && zizmor --min-severity low .github/
 
 ## PR 5：发布流水线
 
-分支：`chore/auto-maint-5-release`。
+分支：`chore/auto-maint-5-release`。**已合并（#34，2026-11-25；原 #16 误合入堆叠分支后重提）**；本地彩排与 GitHub Actions 托管彩排（`dry_run=true`，run `45745244198`，2026-11-26）已通过，**首次正式发布（`v1.0.1`）待维护者确认后触发**。
 
-- [ ] **5.1 发布记录与中断恢复（需你确认，设计稿 §6 留给构建者）**：
+- [x] **5.1 发布记录与中断恢复（需你确认，设计稿 §6 留给构建者）**：
   - **记录载体**：GitHub draft Release + `release-record.json` 资产，记录 `tag`、`sha`、各产物 sha256；所有产物与证明就绪后才把 draft 转为正式发布。`v1.0.0` 没有 draft 与记录，天然落在迁移边界之外。
   - **写入顺序（覆盖"创建 tag 后、写入恢复记录前中断"）**：在发布锁内按 ① 创建 draft Release 与记录（绑定 `next_tag`、`sha`）→ ② 创建**带标记的附注 tag**（注释形如 `watchtower-auto-release sha=<sha>`）并推送 → ③ 构建发布。由于记录先于 tag 写入，常规中断不会出现"有 tag 无记录"。若仍出现（如 ① 与 ② 之间的人为/平台异常），**附注 tag 自身的标记就是第二份记录**：`scheduled-release.yml` 的恢复模式条件 = `latest_tag` 的附注带该标记 **且** 不存在完整的正式 Release；此时按 tag 注释里的 `sha` 补建缺失的 draft/记录，再补齐缺失产物。**没有该标记的 tag（如 `v1.0.0` 与维护者手动 tag）一律不进入自动恢复。**
   - 在 `scheduled-release.yml` 的单元测试里加入中断点用例：仅有 draft 无 tag；有标记 tag 无 draft；有 tag 与部分资产；`v1.0.0` 型无标记 tag。
-- [ ] **5.2 发布锁只由一个工作流层持有，`release.yml` 保持可复用且自身不声明 `concurrency`**：
+- [x] **5.2 发布锁只由一个工作流层持有，`release.yml` 保持可复用且自身不声明 `concurrency`**：
   - 可复用工作流若与调用方声明了同名 `concurrency` 组，会与调用方互相占锁而死锁/被取消。因此 `release-publish` 锁**只在入口工作流声明**：`scheduled-release.yml` 的整个运行，以及处理手动 tag 推送的薄入口（`release-tag.yml`，仅 `push` tag → 调用 `release.yml`）；二者共用同一个组名 `release-publish`、`cancel-in-progress: false`。被调用的 `release.yml`（`workflow_call`：`tag`、`sha`、`skip_ci`）与 `docker-publish.yml` 内**不写** `concurrency`。
   - 这一并发行为（同组只保留一个等待运行，较新的待定运行会顶掉较旧的）需用测试 tag 在彩排环境实测；若手动 tag 的待定运行可能被顶掉，则在 `release-tag.yml` 的验证步骤里检查"该 tag 是否已有完整发布"，并在 PR 描述写明处理方式。
   - **macOS 排队与锁的关系**：`ci.yml` 含继续阻塞的 macOS 测试，排队可能很久。若锁覆盖 `scheduled-release.yml` 的整个运行，等待 macOS 期间会一直占锁，也更容易顶掉待定的手动 tag 运行。实现时优先让锁只覆盖"打 tag 与发布"阶段，CI 在锁外先跑完，取锁后重新核对 `head_sha` 与 `next_tag`；上一条的"整个运行"以此处实测结论为准。
   - 相应地，设计稿 §5.2 中"`release.yml` 触发 tag push + workflow_call 且持锁"的描述需同步修订为"入口工作流持锁"。
-- [ ] **5.2a `release.yml`**（改，可复用）：显式解析 `tag` 与 `sha`；`skip_ci=false` 时先调用 `ci.yml`；发布构建禁用 Go 缓存；GoReleaser 用 `.tools/goreleaser`（`release.draft: true`）；对归档与 `checksums.txt` 调 `actions/attest-build-provenance`；绝不覆盖已有 Release 资产。
-- [ ] **5.3 `docker-publish.yml` 补全**：版本 tag 存在性检查（已存在则比对 `(tag, sha, digest)` 记录，不一致即失败）；SBOM；仅在串行锁内核实该 `tag` 是 `main` 上最高正式版本、版本镜像与证明就绪后才推进 `:latest`；禁用 Buildx 缓存。
-- [ ] **5.4 `scheduled-release.yml`**：每周二 03:23 UTC + `workflow_dispatch`；判定、验证、打 tag、发布四段按设计稿 §5.2 实现；发布路径白名单判定（Go 源码、`go.mod`/`go.sum`、`tools/go.*`、`.go-version`、`dockerfiles/**`、`goreleaser.yml`、`.github/workflows/release.yml` 等，排除 `docs/**`、`*.md`、模板、CODEOWNERS）做成可测试的 Python 函数（`.github/scripts/release_paths.py` + 单元测试）。
-- [ ] **5.5 README** 增加 `gh attestation verify` 校验说明（二进制与镜像）。
+  - [ ] **5.2 线上并发验收**：在托管环境实测同组 `release-publish` 的等待与顶替行为（待彩排/发布阶段验证）。
+- [x] **5.2a `release.yml`**（改，可复用）：显式解析 `tag` 与 `sha`；`skip_ci=false` 时先调用 `ci.yml`；发布构建禁用 Go 缓存；GoReleaser 用 `.tools/goreleaser`（`release.draft: true`）；对归档与 `checksums.txt` 调 `actions/attest-build-provenance`；绝不覆盖已有 Release 资产。
+- [x] **5.3 `docker-publish.yml` 补全**：版本 tag 存在性检查（已存在则比对 `(tag, sha, digest)` 记录，不一致即失败）；SBOM；仅在串行锁内核实该 `tag` 是 `main` 上最高正式版本、版本镜像与证明就绪后才推进 `:latest`；禁用 Buildx 缓存。
+- [x] **5.4 `scheduled-release.yml`**：每周二 03:23 UTC + `workflow_dispatch`；判定、验证、打 tag、发布四段按设计稿 §5.2 实现；发布路径白名单判定（Go 源码、`go.mod`/`go.sum`、`tools/go.*`、`.go-version`、`dockerfiles/**`、`goreleaser.yml`、`.github/workflows/release.yml` 等，排除 `docs/**`、`*.md`、模板、CODEOWNERS）做成可测试的 Python 函数（`.github/scripts/release_paths.py` + 单元测试）。
+- [x] **5.5 README** 增加 `gh attestation verify` 校验说明（二进制与镜像）。
 - [ ] **5.6 彩排（必须）**：发布会推公开的 tag 与 `:latest`，一旦错了无法撤回（所有宿主机会自动拉取）。因此：
   - 先在**一个临时私有副本仓库**或用 `workflow_dispatch` 的 dry-run 开关（不创建 tag、不推 GHCR，只跑到 snapshot 与 `docker build`）走通；
   - 真实首次发布用 `workflow_dispatch` 手动触发，并在 `main-checks` 已启用的状态下进行；
   - 首次发布版本应是 `v1.0.1`（`v1.0.0` 之后的第一个补丁）。
+  - **2026-11-26 状态**：本地 GoReleaser snapshot（8 归档）与 4 架构 Linux Docker（`--no-push`）已在 #34 验证通过；`main` 上的 `scheduled-release.yml` 托管彩排（`dry_run=true`，run `45745244198`）已通过（`dry-run-docker` 2m8s、`dry-run-snapshot` 5m37s，`plan` / `ci` / `publish` 按预期 `skipped`）。最新正式版本仍为 `v1.0.0`；OIDC 签名、GHCR 推送、`:latest` 推进与发布幂等性留待维护者确认后的首次正式发布（`v1.0.1`，`dry_run=false`）验证。
 
 **PR 5 验收**
 
@@ -318,10 +322,18 @@ python -I -m unittest discover -s .github/scripts -v
 ## M3：端到端验收（设计稿 §8 第 7、8 项）
 
 - [ ] 手动触发 `go-toolchain-sync.yml`：生成 `1.26 → 1.27` PR，提交显示 Verified，`automerge.yml` 输出 `eligible=false`，被 `main-review` 拦下；你 Approve 后合入。
+  - **2026-11-26 状态**：近期 `push` 到 `main` 的运行成功（如 `45743498035`），手动 `workflow_dispatch` 尚未执行。另需注意 4.2 记录的已知配置限制：`golang.org/toolchain` 在 `index.golang.org` 的 10 次请求预算内未命中时脚本会 fail-closed 返回 `needs_sync=False`，不创建 PR。
 - [ ] 观察首批 Dependabot PR：低风险补丁/次版本在 `Pull Request` + `CodeQL` 全绿且冷却期满足后由 `watchtower-automerge` 合入；GitHub Actions PR 与安全更新 PR 被拦；同时核对 `/tools` 的 `tool` 依赖是否被 Dependabot 识别、`pip` PR 是否保持 `--hash` 格式（2.6 的遗留验证）。
+  - **2026-11-26 状态**：
+    - 已核实 Dependabot 识别 `/tools` 依赖并开启多条升级 PR（#17–#26、#28–#33 等）。
+    - #19、#24、#32、#33 均由维护者账号合并；近期 `Automerge` 运行（如 `45743494426`）中 `Verify automerge eligibility` 成功、`Merge verified pull request` 为 `skipped`。4.1a 的离线复核表明正文信号无法区分普通更新与安全更新，当前白名单为空，普通更新的机器人合并仍需取得与 PR head SHA 绑定的可信证据。
+    - GitHub Actions PR、安全更新 PR 与 `pip` PR（`--hash` 格式）待后续观察。
 - [ ] 手动触发 `scheduled-release.yml`：固定 SHA → CI → tag → GoReleaser v2 → GHCR + 证明全链路通过。
+  - **2026-11-26 状态**：`main` 上的 `dry_run=true` 托管彩排（run `45745244198`）已通过；待维护者确认后触发正式发布 `v1.0.1`（`dry_run=false`）验证全链路。
 - [ ] Actions 页确认 `go-toolchain-sync.yml` 与 `scheduled-release.yml` 为 `active`；把"60 天无活动会被停用"写进你的日历提醒（`scheduled-release` 本身不产生活动，合入频繁时自然续期，但无新提交时需要关注）。
+  - **2026-11-26 已核实**：`gh workflow list --all` 确认 `Go Toolchain Sync` 与 `Scheduled release` 均为 `active`；日历提醒待维护者自行设置。
 - [ ] 负面验收：用一个测试 PR（改一行文档）确认**非机器人 PR 不会被自动合并**；用无 admin 权限的身份开 PR，确认无法绕过 `main-review`。
+  - **2026-11-26 已核实（前半项）**：PR #35（`b4b30c5`，仅改计划文档）在 `Pull Request`（run `45749026165`）与 `CodeQL`（run `45749025947`）全绿后触发 `Automerge`（run `45749585531`），`Verify automerge eligibility` 明确输出 `automerge verify: eligible=false: author Shouyupedia is not allowed`，`Merge verified pull request` 为 `skipped`，PR 保持 `OPEN`。后半项（无 admin 权限身份无法绕过 `main-review`）待验收。
 
 ## 风险与回滚
 

@@ -24,13 +24,10 @@ Design rules enforced here
   ``docker`` and ``pip``; ``github_actions`` is never eligible.  File and
   line-level whitelists, major-version rejection and registry cooldowns are
   applied per ecosystem.
-* Dependabot security updates must never be auto-merged.  Although M1 enabled
-  Dependabot security updates on 2026-11-25 (``d3484b7``), this repository has
-  no real normal/security-update PR pair yet, so there is **no calibrated
-  positive signal** that a Dependabot PR is an ordinary version update.  The
-  default ``CALIBRATED_NORMAL_UPDATE_SIGNALS`` set is intentionally empty:
-  every Dependabot PR is therefore ineligible and goes to manual review.  Add
-  a signal only after it has been calibrated against real samples in M3.
+* Dependabot security updates go to manual review. Offline checks found real
+  version and security updates sharing the same body shape, so until the
+  verifier can establish the update kind for the exact PR head, all Dependabot
+  PRs require manual review.
 * Go-toolchain PRs from ``watchtower-updater[bot]`` may be eligible only for a
   single same-minor patch increment (exactly ``+1``) that synchronises
   ``.go-version`` and all three Dockerfiles, with both the Go toolchain and the
@@ -176,11 +173,8 @@ PEP503_RE = re.compile(r"[-_.]+")
 
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]+")
 
-# A candidate signal is *detected* from Dependabot's generated PR body, but it
-# is not trusted until it has been calibrated against real samples.  M1 is
-# complete (2026-11-25, ``d3484b7``), but no real Dependabot normal/security
-# PR pair exists yet; the set stays empty until M3 can compare real samples.
-# Until then: manual review.
+# Real security updates can carry the same body shape. Keep the candidate out
+# of the production allowlist until the update kind is verifiable per PR head.
 CALIBRATED_NORMAL_UPDATE_SIGNALS: frozenset[str] = frozenset()
 DEPENDABOT_BODY_SIGNAL = "dependabot-body-v1"
 
@@ -682,17 +676,19 @@ def _check_identity_and_commits(
 
 
 def _parse_go_mod(text: str, path: str):
-    """Return (non_require_directives, require_map) for a go.mod file.
+    """Return non-require directives, required versions, and indirect modules.
 
-    ``non_require_directives`` preserves order and includes every directive
-    other than ``require`` (including unknown ones) so any change to them is a
-    rejection.  ``require_map`` maps module path to version.
+    Non-require directives preserve order and include unknown directives so any
+    change to them is a rejection.
     """
     directives: list[tuple[str, tuple[str, ...]]] = []
     requires: dict[str, str] = {}
+    indirect_modules: set[str] = set()
     block: str | None = None
 
-    def parse_entry(directive: str, entry: str, lineno: int) -> None:
+    def parse_entry(
+        directive: str, entry: str, lineno: int, comment: str = ""
+    ) -> None:
         try:
             tokens = tuple(shlex.split(entry, comments=False, posix=True))
         except ValueError as exc:
@@ -707,6 +703,10 @@ def _parse_go_mod(text: str, path: str):
                 f"{path}:{lineno}: duplicate require for {_safe(module)}",
             )
             requires[module] = version
+            # Match Go's modfile.isIndirect rules for suffix comments.
+            words = comment.split()
+            if words == ["indirect"] or (len(words) > 1 and words[0] == "indirect;"):
+                indirect_modules.add(module)
             return
         if directive in {"module", "go", "toolchain", "tool", "godebug"}:
             _require(
@@ -726,7 +726,8 @@ def _parse_go_mod(text: str, path: str):
         directives.append((directive, tokens))
 
     for lineno, raw in enumerate(text.split("\n"), start=1):
-        line = _strip_go_comment(raw).strip()
+        code, comment = _split_go_comment(raw)
+        line = code.strip()
         if not line:
             continue
         if block is not None:
@@ -739,7 +740,7 @@ def _parse_go_mod(text: str, path: str):
                     parse_entry(block, entry, lineno)
                 block = None
                 continue
-            parse_entry(block, line, lineno)
+            parse_entry(block, line, lineno, comment)
             continue
 
         try:
@@ -762,7 +763,7 @@ def _parse_go_mod(text: str, path: str):
             if inner:
                 parse_entry(directive, inner, lineno)
             continue
-        parse_entry(directive, " ".join(rest), lineno)
+        parse_entry(directive, " ".join(rest), lineno, comment)
     _require(block is None, f"{path}: unclosed go.mod block")
     _require(
         sum(1 for name, _ in directives if name == "module") == 1,
@@ -776,10 +777,10 @@ def _parse_go_mod(text: str, path: str):
         sum(1 for name, _ in directives if name == "toolchain") <= 1,
         f"{path}: multiple toolchain directives",
     )
-    return directives, requires
+    return directives, requires, indirect_modules
 
 
-def _strip_go_comment(line: str) -> str:
+def _split_go_comment(line: str) -> tuple[str, str]:
     in_quote = None
     index = 0
     while index < len(line):
@@ -794,9 +795,9 @@ def _strip_go_comment(line: str) -> str:
             if char in ('"', "`"):
                 in_quote = char
             elif char == "/" and index + 1 < len(line) and line[index + 1] == "/":
-                return line[:index]
+                return line[:index], line[index + 2:]
         index += 1
-    return line
+    return line, ""
 
 
 def _go_semver_key(version: str) -> tuple:
@@ -909,8 +910,8 @@ def _validate_go_mod_change(
     http_get: cooldown.HttpGet,
     now: datetime,
 ) -> None:
-    base_directives, base_requires = _parse_go_mod(base_text, "base go.mod")
-    head_directives, head_requires = _parse_go_mod(head_text, "head go.mod")
+    base_directives, base_requires, base_indirect = _parse_go_mod(base_text, "base go.mod")
+    head_directives, head_requires, _ = _parse_go_mod(head_text, "head go.mod")
     _require(
         base_directives == head_directives,
         "go.mod changes a directive other than require "
@@ -921,14 +922,15 @@ def _validate_go_mod_change(
         "go.mod has no require changes",
     )
 
-    removed = set(base_requires) - set(head_requires)
-    if removed:
+    removed = base_requires.keys() - head_requires.keys()
+    removed_direct = removed - base_indirect
+    if removed_direct:
         raise Ineligible(
-            f"go.mod removes required module {_safe(sorted(removed)[0])}"
+            f"go.mod removes required module {_safe(min(removed_direct))}"
         )
 
     changes = 0
-    for module in sorted(base_requires):
+    for module in sorted(base_requires.keys() & head_requires.keys()):
         old_version = base_requires[module]
         new_version = head_requires[module]
         if old_version == new_version:
@@ -936,7 +938,11 @@ def _validate_go_mod_change(
         days = _validate_go_require_upgrade(module, old_version, new_version)
         _check_go_cooldown(module, new_version, days, http_get, now)
         changes += 1
-    for module in sorted(set(head_requires) - set(base_requires)):
+    _require(
+        not removed or changes > 0,
+        "go.mod removes indirect modules without an allowed upgrade",
+    )
+    for module in sorted(head_requires.keys() - base_requires.keys()):
         _check_go_cooldown(
             module,
             head_requires[module],
@@ -1530,7 +1536,7 @@ def _detect_normal_update_signal(pr: dict) -> str | None:
     Detection is deliberately conservative and structural: Dependabot's
     generated body starts with a bump line and contains at least one details
     section.  Detection alone is never enough; the signal must also be in the
-    calibrated allowlist (empty until real samples exist).
+    calibrated allowlist. Real security PRs can have this same structure.
     """
     body = pr.get("body")
     if not isinstance(body, str) or not body.strip():
@@ -1573,7 +1579,7 @@ def _check_dependabot_update_kind(
     )
     _require(
         signal in calibrated_signals,
-        "ordinary-update signal is not calibrated against real samples; "
+        "PR body cannot distinguish version and security updates; "
         "manual review required",
     )
 
