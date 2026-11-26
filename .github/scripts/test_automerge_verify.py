@@ -1731,6 +1731,51 @@ class GoModulesTests(AutomergeTestCase):
             scenario.verify(), "go.mod removes required module example.com/mod"
         )
 
+    def test_indirect_removals_with_upgrade_are_eligible(self) -> None:
+        scenario = Scenario()
+        scenario.set_base_file(
+            "go.mod",
+            go_mod_text(
+                requires=(
+                    ("example.com/mod", "v1.2.3"),
+                    ("example.com/old", "v1.0.0 // indirect"),
+                )
+            )
+            + "\nrequire example.com/another v1.0.0 // indirect; explanation\n",
+        )
+        self.assertEligible(scenario.verify(), pr_number=42, head_sha=HEAD_SHA)
+
+        scenario.check_run("CI / mod-check")["conclusion"] = "failure"
+        self.assertRejected(
+            scenario.verify(), "required check CI / mod-check concluded failure"
+        )
+
+    def test_indirect_removal_requires_an_existing_module_upgrade(self) -> None:
+        for added in ((), (("example.com/newdep", "v0.1.0"),)):
+            with self.subTest(added=added):
+                scenario = Scenario()
+                scenario.set_base_file(
+                    "go.mod",
+                    GO_MOD_BASE + "\nrequire example.com/old v1.0.0 // indirect\n",
+                )
+                scenario.set_head_file(
+                    "go.mod", go_mod_text(requires=(("example.com/mod", "v1.2.3"), *added))
+                )
+                self.assertRejected(
+                    scenario.verify(), "go.mod removes indirect modules without an allowed upgrade"
+                )
+
+    def test_removal_with_upgrade_requires_indirect_marker_in_base(self) -> None:
+        for comment in ("", " // indirectly", " // explanation indirect"):
+            with self.subTest(comment=comment):
+                scenario = Scenario()
+                scenario.set_base_file(
+                    "go.mod", GO_MOD_BASE + f"\nrequire example.com/old v1.0.0{comment}\n"
+                )
+                self.assertRejected(
+                    scenario.verify(), "go.mod removes required module example.com/old"
+                )
+
     def test_missing_trusted_first_seen_record(self) -> None:
         scenario = Scenario()
         scenario.http_map[go_index_url(GO_HINT)] = ndjson(

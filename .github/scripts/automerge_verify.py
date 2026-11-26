@@ -676,17 +676,19 @@ def _check_identity_and_commits(
 
 
 def _parse_go_mod(text: str, path: str):
-    """Return (non_require_directives, require_map) for a go.mod file.
+    """Return non-require directives, required versions, and indirect modules.
 
-    ``non_require_directives`` preserves order and includes every directive
-    other than ``require`` (including unknown ones) so any change to them is a
-    rejection.  ``require_map`` maps module path to version.
+    Non-require directives preserve order and include unknown directives so any
+    change to them is a rejection.
     """
     directives: list[tuple[str, tuple[str, ...]]] = []
     requires: dict[str, str] = {}
+    indirect_modules: set[str] = set()
     block: str | None = None
 
-    def parse_entry(directive: str, entry: str, lineno: int) -> None:
+    def parse_entry(
+        directive: str, entry: str, lineno: int, comment: str = ""
+    ) -> None:
         try:
             tokens = tuple(shlex.split(entry, comments=False, posix=True))
         except ValueError as exc:
@@ -701,6 +703,10 @@ def _parse_go_mod(text: str, path: str):
                 f"{path}:{lineno}: duplicate require for {_safe(module)}",
             )
             requires[module] = version
+            # Match Go's modfile.isIndirect rules for suffix comments.
+            words = comment.split()
+            if words == ["indirect"] or (len(words) > 1 and words[0] == "indirect;"):
+                indirect_modules.add(module)
             return
         if directive in {"module", "go", "toolchain", "tool", "godebug"}:
             _require(
@@ -720,7 +726,8 @@ def _parse_go_mod(text: str, path: str):
         directives.append((directive, tokens))
 
     for lineno, raw in enumerate(text.split("\n"), start=1):
-        line = _strip_go_comment(raw).strip()
+        code, comment = _split_go_comment(raw)
+        line = code.strip()
         if not line:
             continue
         if block is not None:
@@ -733,7 +740,7 @@ def _parse_go_mod(text: str, path: str):
                     parse_entry(block, entry, lineno)
                 block = None
                 continue
-            parse_entry(block, line, lineno)
+            parse_entry(block, line, lineno, comment)
             continue
 
         try:
@@ -756,7 +763,7 @@ def _parse_go_mod(text: str, path: str):
             if inner:
                 parse_entry(directive, inner, lineno)
             continue
-        parse_entry(directive, " ".join(rest), lineno)
+        parse_entry(directive, " ".join(rest), lineno, comment)
     _require(block is None, f"{path}: unclosed go.mod block")
     _require(
         sum(1 for name, _ in directives if name == "module") == 1,
@@ -770,10 +777,10 @@ def _parse_go_mod(text: str, path: str):
         sum(1 for name, _ in directives if name == "toolchain") <= 1,
         f"{path}: multiple toolchain directives",
     )
-    return directives, requires
+    return directives, requires, indirect_modules
 
 
-def _strip_go_comment(line: str) -> str:
+def _split_go_comment(line: str) -> tuple[str, str]:
     in_quote = None
     index = 0
     while index < len(line):
@@ -788,9 +795,9 @@ def _strip_go_comment(line: str) -> str:
             if char in ('"', "`"):
                 in_quote = char
             elif char == "/" and index + 1 < len(line) and line[index + 1] == "/":
-                return line[:index]
+                return line[:index], line[index + 2:]
         index += 1
-    return line
+    return line, ""
 
 
 def _go_semver_key(version: str) -> tuple:
@@ -903,8 +910,8 @@ def _validate_go_mod_change(
     http_get: cooldown.HttpGet,
     now: datetime,
 ) -> None:
-    base_directives, base_requires = _parse_go_mod(base_text, "base go.mod")
-    head_directives, head_requires = _parse_go_mod(head_text, "head go.mod")
+    base_directives, base_requires, base_indirect = _parse_go_mod(base_text, "base go.mod")
+    head_directives, head_requires, _ = _parse_go_mod(head_text, "head go.mod")
     _require(
         base_directives == head_directives,
         "go.mod changes a directive other than require "
@@ -915,14 +922,15 @@ def _validate_go_mod_change(
         "go.mod has no require changes",
     )
 
-    removed = set(base_requires) - set(head_requires)
-    if removed:
+    removed = base_requires.keys() - head_requires.keys()
+    removed_direct = removed - base_indirect
+    if removed_direct:
         raise Ineligible(
-            f"go.mod removes required module {_safe(sorted(removed)[0])}"
+            f"go.mod removes required module {_safe(min(removed_direct))}"
         )
 
     changes = 0
-    for module in sorted(base_requires):
+    for module in sorted(base_requires.keys() & head_requires.keys()):
         old_version = base_requires[module]
         new_version = head_requires[module]
         if old_version == new_version:
@@ -930,7 +938,11 @@ def _validate_go_mod_change(
         days = _validate_go_require_upgrade(module, old_version, new_version)
         _check_go_cooldown(module, new_version, days, http_get, now)
         changes += 1
-    for module in sorted(set(head_requires) - set(base_requires)):
+    _require(
+        not removed or changes > 0,
+        "go.mod removes indirect modules without an allowed upgrade",
+    )
+    for module in sorted(head_requires.keys() - base_requires.keys()):
         _check_go_cooldown(
             module,
             head_requires[module],

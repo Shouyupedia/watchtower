@@ -115,7 +115,7 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
      - **敏感路径硬禁区**：PR 修改的文件列表中绝对禁止出现 `.github/workflows/**`、`.github/actions/**`、`.github/scripts/**`、`.github/CODEOWNERS`、`.github/dependabot.yml`（及任意路径下的 `CODEOWNERS`、`dependabot.yml`、`dependabot.yaml`）。
      - **按机器人与生态执行精确文件及行级 diff 白名单**：
        - **当作者为 `dependabot[bot]` 时**，从 `head.ref` 前缀解析生态，仅允许 `go_modules`、`docker`、`pip`（`github_actions` 永远返回 `eligible=false`）：
-         - `go_modules`：改动文件仅限 `go.mod`/`go.sum` 或 `tools/go.mod`/`tools/go.sum`；解析新旧 `go.mod`，**禁止新增、删除或修改 `go`、`toolchain`、`replace`、`exclude`、`retract`、`tool` 指令**，仅允许 `require` 条目的补丁版或次版本升级（拒绝任何主版本变更），且所有变更/新增模块通过可信首次公开可见时间冷却期核验。
+         - `go_modules`：改动文件仅限 `go.mod`/`go.sum` 或 `tools/go.mod`/`tools/go.sum`。解析新旧 `go.mod`，禁止更改 `require` 以外的指令。现有模块只允许补丁版或次版本升级，升级或新增的模块均须通过可信首次公开可见时间冷却期核验。删除 `require` 条目仅限基线中标有 `// indirect` 的模块，且同一个 PR 必须至少升级一个现有模块并通过全部必需检查，包括运行 `go mod tidy -diff` 的 `CI / mod-check`。
          - `docker`：改动文件仅限 `dockerfiles/Dockerfile*`；仅允许既有 `FROM` 行的 `@sha256:...` digest 变化，镜像名与标签保持一字不差，不允许改动其他行，且通过 Docker Hub 7 天冷却期核验。
          - `pip`：改动文件仅限 `docs-requirements.txt`；仅允许既有/传递包的补丁版或次版本升级，每个包条目必须附带 `--hash=sha256:...`，不允许引入额外安装源参数（如 `--index-url`、`--extra-index-url`、git URL），且通过 PyPI 7 天冷却期核验。
        - **当作者为 `watchtower-updater[bot]` 时**（Go 工具链同步 PR）：
