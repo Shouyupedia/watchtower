@@ -16,12 +16,13 @@ rules:
     ignore:
       - dependabot.yml:9
       - dependabot.yml:24
+      - dependabot.yml:43
 
   self-repository:
     # actionlint v1.7.12 rejects the newer "$/..." syntax and requires "./..."
     # for local composite actions and reusable workflows.
     ignore:
-      - ci.yml:241
+      - ci.yml:246
       - docker-publish.yml:127
       - pull-request.yml:17
       - push-main.yml:14

@@ -139,6 +139,11 @@ jobs:
         run: |
           go mod verify
           go mod tidy -diff
+      - name: Verify and check tidy for actionlint module
+        working-directory: tools/actionlint
+        run: |
+          go mod verify
+          go mod tidy -diff
 
   version-consistency:
     name: version-consistency
@@ -287,7 +292,7 @@ jobs:
         with:
           go-version-file: .go-version
       - name: Run actionlint
-        run: go tool -modfile=tools/go.mod actionlint
+        run: go tool -modfile=tools/actionlint/go.mod actionlint
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:

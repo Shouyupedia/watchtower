@@ -97,6 +97,10 @@ def make_repo_files(
             "utf-8"
         ),
         "tools/go.sum": f"example.com/tool v0.1.0 h1:xyz={nl}".encode("utf-8"),
+        "tools/actionlint/go.mod": f"module example.com/watchtower/tools/actionlint{nl}{nl}go {tools_go_mod_directive}{nl}".encode(
+            "utf-8"
+        ),
+        "tools/actionlint/go.sum": f"example.com/lint v0.1.0 h1:xyz={nl}".encode("utf-8"),
     }
 
 
@@ -822,10 +826,12 @@ class PrepareSyncBundleTests(unittest.TestCase):
                 "go.mod",
                 "go.sum",
                 "tools/go.mod",
+                "tools/actionlint/go.mod",
             },
         )
         self.assertIn(b"go 1.27.0\n", bundle.files["go.mod"])
         self.assertIn(b"go 1.27.0\n", bundle.files["tools/go.mod"])
+        self.assertIn(b"go 1.27.0\n", bundle.files["tools/actionlint/go.mod"])
         self.assertEqual(bundle.files["go.sum"], b"example.com/dep v1.0.0 h1:tidied=\n")
 
         # Original repo untouched.
