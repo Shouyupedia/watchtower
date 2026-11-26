@@ -111,7 +111,14 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
      - **必需检查全绿**：查询本仓库关联到该 PR 同一个 `head_sha` 的 `Pull Request` 工作流与 `CodeQL`（`event == "pull_request"`）工作流运行记录，确认两者均已完成且结论为 `success`，同时查询 `head_sha` 上的必需 check-runs 状态全部通过（若另一工作流仍在运行则本次静默退出，待最后完成的工作流触发时再合入）。
      - **可信机器人身份绑定**：`pr.user.login` 仅允许 `dependabot[bot]` 或 `watchtower-updater[bot]`，**绝不凭分支名、PR 标签或通用 `github-actions[bot]` 放行**。
      - **完整提交列表与签名校验**：分页拉取 PR 的全部提交并核对条数等于 `pr.commits`；要求每一个提交都满足 `commit.verification.verified == true`、`author.login` 等于该 PR 作者机器人，且 `committer.login` 仅限 `web-flow` 或该机器人本身。**禁止调用 `update-branch` 向自动 PR 注入合并提交**（否则会引入非机器人提交破坏签名链）。
-     - **拒绝安全更新（含校准边界）**：核查 PR 不关联 Dependabot 安全告警，也不带 security 相关标签或安全更新元数据，且必须命中经过真实样本校准的普通更新正向信号。4.1a 真实样本回放表明，两类更新均能命中 `dependabot-body-v1`。在只读校验器能将普通更新的来源绑定到具体 PR 和提交前，`CALIBRATED_NORMAL_UPDATE_SIGNALS` 保持为空，Dependabot PR 转人工审核。
+     - **拒绝安全更新（含校准边界）**：核查 PR 不关联 Dependabot 安全告警，也不带 security 相关标签或安全更新元数据，且必须命中经过真实样本校准的普通更新正向信号。4.1a 真实样本回放表明，两类更新均能命中 `dependabot-body-v1`。在只读校验器能将普通更新的来源绑定到具体 PR 和提交前，`CALIBRATED_NORMAL_UPDATE_SIGNALS` 保持为空，Dependabot PR 转人工审核。候选信号 `dependabot-group-v1` 只适用于 `go_modules`，它读取 head 上唯一签名提交里的 `updated-dependencies` 元数据，并要求同时满足以下条件：
+       - 元数据块完整，没有被截断。
+       - 每个条目都属于该模块根目录对应的版本更新组（`/` 对应 `go-minor-patch`，`/tools` 对应 `tools-minor-patch`，对应关系写死在校验器中），`update-type` 只能是 minor 或 patch，且条目列出的模块必须在 `go.mod` 中实际升级。
+       - 反过来不作要求：Dependabot 不会在元数据中列出连带升级的传递依赖，因此 `go.mod` 中升级了但元数据未列出的模块不会导致拒绝。这些模块仍须通过 `go.mod` 的升级规则和冷却期核验。
+       - 分支名与组名、目录严格一致。
+       - merge base 上的 `dependabot.yml` 中有以该组名为键的行，且全文不出现 `applies-to` 或 `security-updates`。校验器只做这两项文本检查，不解析该组属于哪个生态或目录；组与目录的对应由上一条的分支名和写死的对应关系保证。
+
+       label 和正文的安全否决条件仍然有效。**运维不变量**：这个信号成立的前提是仓库设置 “Grouped security updates” 保持关闭（2026-11-26 维护者确认为关闭；API 不暴露该开关）。打开该开关前，必须先把这个信号移出白名单。
      - **敏感路径硬禁区**：PR 修改的文件列表中绝对禁止出现 `.github/workflows/**`、`.github/actions/**`、`.github/scripts/**`、`.github/CODEOWNERS`、`.github/dependabot.yml`（及任意路径下的 `CODEOWNERS`、`dependabot.yml`、`dependabot.yaml`）。
      - **按机器人与生态执行精确文件及行级 diff 白名单**：
        - **当作者为 `dependabot[bot]` 时**，从 `head.ref` 前缀解析生态，仅允许 `go_modules`、`docker`、`pip`（`github_actions` 永远返回 `eligible=false`）：
