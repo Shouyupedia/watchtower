@@ -24,7 +24,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import release_cli
 import release_image
-from release_gh import Release
+from release_gh import GitHub, Release
 from release_paths import has_release_changes
 from release_plan import MARKER, Candidate, ReleaseError, Tag
 from release_record import ARCHIVES, RECORD, Record, checksums_name, file_sha256
@@ -617,6 +617,23 @@ class ReleaseCliTest(unittest.TestCase):
                 self.assertEqual(reg.assigned, [(expected_tag, DIGEST_A)])
                 if operation == "latest":
                     self.assertEqual(out, {"promoted": "true"})
+
+    def test_save_resends_tag_name_so_untagged_drafts_keep_it(self) -> None:
+        record = Record("v1.0.1", SHA_NEXT, True)
+        draft = Release(101, "v1.0.1", True, "Watchtower v1.0.1", record)
+        github = GitHub("owner/watchtower", self.tmp)
+        sent: list[dict] = []
+
+        def api(path, *, pages=False, method="GET", data=None):
+            sent.append(data)
+            # GitHub drops the tag name of an untagged draft when it is omitted.
+            return {"id": 101, "tag_name": data.get("tag_name", "untagged-0123"),
+                    "body": data["body"], "draft": True, "prerelease": False}
+
+        with mock.patch.object(github, "api", side_effect=api):
+            saved = github.save(draft, record)
+        self.assertEqual(sent[0]["tag_name"], "v1.0.1")
+        self.assertEqual((saved.tag, saved.record), ("v1.0.1", record))
 
 
 if __name__ == "__main__":
