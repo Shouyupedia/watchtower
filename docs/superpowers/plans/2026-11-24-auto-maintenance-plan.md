@@ -1,6 +1,6 @@
 # 自动维护实施计划
 
-日期：2026-11-24（进度更新：2026-11-26）
+日期：2026-11-24（进度更新：2026-11-27）
 依据：`docs/superpowers/specs/2026-11-17-auto-maintenance-design.md`（状态：已修订，待批准）
 状态：执行中（PR 1–5 已合入 `main`，M3 端到端验收进行中）
 
@@ -23,7 +23,7 @@
 | M2 | 创建 `main-checks`、`main-review` Ruleset | PR 3 合入并跑过 | 维护者 | 已完成（2026-11-25） |
 | PR 4 | `automerge.yml`、`go-toolchain-sync.yml` 及其校验脚本 | M1、M2 | 实现者 | 已合并（#14）；真实样本已排除正文信号，正向自动合并待验收 |
 | PR 4b | macOS 发布目标（`darwin/amd64`、`darwin/arm64`），发布契约 6 → 8 个归档 | PR 4 | 实现者 | 已合并（#27，原 #15 合入堆叠分支后重提） |
-| PR 5 | `release.yml`、`scheduled-release.yml`、证明与 SBOM | PR 4b | 实现者 | 已合并（#34，原 #16 合入堆叠分支后重提）；dry-run 托管彩排已通过（`45745244198`），首次正式发布待触发 |
+| PR 5 | `release.yml`、`scheduled-release.yml`、证明与 SBOM | PR 4b | 实现者 | 已合并（#34，原 #16 合入堆叠分支后重提）；首次正式发布 `v1.0.1`（`45937413435`）与重复触发幂等性（`45940072860`）均已通过 |
 | M3 | 端到端验收 | 全部 | 维护者 + 实现者 | 进行中 |
 
 ## 0.1 开始前需要你决定的 4 件事（有默认值，不回复则按默认）
@@ -37,16 +37,16 @@
 
 ## PR 1：清理上游残留与脚本/文档修复
 
-分支：`chore/auto-maint-1-cleanup`。**不改任何 CI 行为。**
+分支：`chore/auto-maint-1-cleanup`。**已合并（#10）。不改任何 CI 行为。**
 
-- [ ] **1.1 删除文件**：`oryxBuildBinary`、`scripts/codecov.sh`、`.github/stale.yml`、`.devbots/`、`.codacy.yml`、`.all-contributorsrc`。
+- [x] **1.1 删除文件**：`oryxBuildBinary`、`scripts/codecov.sh`、`.github/stale.yml`、`.devbots/`、`.codacy.yml`、`.all-contributorsrc`。
   - 先 `git rm`，再 `git grep -n -E 'oryxBuildBinary|codecov\.sh|stale\.yml|devbots|codacy|all-contributors'` 确认没有其他引用（`docs/index.md` 的徽章、CONTRIBUTING 在 1.6 处理）。
-- [ ] **1.2 `.gitignore`** 加入 `/oryxBuildBinary`、`/.tools/`。
-- [ ] **1.3 `.gitattributes`**（见 0.1 第 2 项，仅限定文件类型，**不做全仓 renormalize**）。加完后 `git status` 应只多出这一个文件。
-- [ ] **1.4 `.github/CODEOWNERS`** 重写为单行 `* @Shouyupedia`。
-- [ ] **1.5 `scripts/build-tplprev.sh`**：改为 `set -euo pipefail`；`misc/wasm/wasm_exec.js` → `lib/wasm/wasm_exec.js`（已核实 Go 1.27 的 `lib/wasm/` 下有该文件）；`cd "$(git rev-parse --show-toplevel)"` 加引号；`GOARCH=wasm GOOS=js` 输出路径不变。
+- [x] **1.2 `.gitignore`** 加入 `/oryxBuildBinary`、`/.tools/`。
+- [x] **1.3 `.gitattributes`**（见 0.1 第 2 项，仅限定文件类型，**不做全仓 renormalize**）。加完后 `git status` 应只多出这一个文件。
+- [x] **1.4 `.github/CODEOWNERS`** 重写为单行 `* @Shouyupedia`。
+- [x] **1.5 `scripts/build-tplprev.sh`**：改为 `set -euo pipefail`；`misc/wasm/wasm_exec.js` → `lib/wasm/wasm_exec.js`（已核实 Go 1.27 的 `lib/wasm/` 下有该文件）；`cd "$(git rev-parse --show-toplevel)"` 加引号；`GOARCH=wasm GOOS=js` 输出路径不变。
   - 验证：`bash scripts/build-tplprev.sh && ls docs/assets/wasm_exec.js docs/assets/tplprev.wasm`（这两个文件已在 `.gitignore`）。
-- [ ] **1.6 模板与说明文档**：
+- [x] **1.6 模板与说明文档**：
   - `.github/ISSUE_TEMPLATE/bug.yml`：镜像名改为 `ghcr.io/shouyupedia/watchtower:latest`，删除"其他 fork 不受支持 / v2tec"整句。
   - `.github/ISSUE_TEMPLATE/config.yml`：联系链接改为本仓库。**注意**：远端 `has_issues: false`，Issue 模板暂不生效；保持现状并在 M1 里让你决定是否启用 Issues。
   - `.github/pull_request_template.md`：去掉面向社区贡献者的措辞，保留检查项。
@@ -54,15 +54,15 @@
   - `code_of_conduct.md`：改为引用 Contributor Covenant 2.1。
   - `CONTRIBUTING.md`：示例镜像名改为本仓库；更正 `Dockerfile.self-contained` 说明（先读 `dockerfiles/Dockerfile.self-contained` 确认它现在构建本地源码）。
   - `scripts/dependency-test.sh:66` 镜像名改为本仓库。
-- [ ] **1.7 `docs/*.md`**（`git grep -n -E 'containrrr' -- docs ':!docs/superpowers'` 约 60 处）：
+- [x] **1.7 `docs/*.md`**（`git grep -n -E 'containrrr' -- docs ':!docs/superpowers'` 约 60 处）：
   - `containrrr/watchtower` → `ghcr.io/shouyupedia/watchtower`（`docs/arguments.md`、`http-api-mode.md`、`index.md`、`introduction.md`、`notifications.md`、`private-registries.md`、`remote-hosts.md`、`running-multiple-instances.md`、`secure-connections.md`、`usage-overview.md`）。
   - `docs/introduction.md:11` 是示例输出，同步改镜像名。
   - `containrrr.dev/watchtower/...`、`containrrr.github.io/watchtower/...` → 站内相对链接（`arguments.md:250,330,362`、`container-selection.md:6,34,58,81`、`notifications.md:22`、`running-multiple-instances.md:1`）。
   - `docs/updating.md:5` 与 `docs/usage-overview.md:1`：Docker Hub 改为 GHCR（`usage-overview.md` 里 `armhf-<tag>` 镜像说法按 GHCR 实际发布的多架构清单改写，先读 `dockerfiles` 与发布流程确认）。
   - `docs/index.md:11-36`：删除 CircleCI、Codecov、GoDoc、Go Report Card、Codacy、All Contributors、Docker Hub 徽章，保留许可证徽章并指向本仓库。
   - **保留**：`containrrr.dev/shoutrrr/...`（真实依赖）、`com.centurylinklabs.*`。
-- [ ] **1.8 `mkdocs.yml`**：`repo_url`、`magiclink.user` 指向本仓库（`site_url` 在 PR 3 中移除，不发布 GitHub Pages）；增加 `exclude_docs: superpowers/`（需 mkdocs ≥ 1.5，PR 2 锁定版本时核对）。
-- [ ] **1.9 README**：增加 `gh attestation verify` 说明的占位小节留到 PR 5，这里不动。
+- [x] **1.8 `mkdocs.yml`**：`repo_url`、`magiclink.user` 指向本仓库（`site_url` 在 PR 3 中移除，不发布 GitHub Pages）；增加 `exclude_docs: superpowers/`（需 mkdocs ≥ 1.5，PR 2 锁定版本时核对）。
+- [x] **1.9 README**：增加 `gh attestation verify` 说明的占位小节留到 PR 5，这里不动。
 
 **PR 1 验收**
 
@@ -77,10 +77,10 @@ bash scripts/build-tplprev.sh
 
 ## PR 2：工具链、GoReleaser v2、依赖锁定
 
-分支：`chore/auto-maint-2-toolchain`。
+分支：`chore/auto-maint-2-toolchain`。**已合并（#11）。**
 
-- [ ] **2.1 `.go-version`**：写入当前 1.26 系列最新补丁版（`curl -s 'https://go.dev/dl/?mode=json' | python -c ...` 取 `1.26.*` 最新稳定版；`go.mod` 的 `go 1.26.0` 不变）。选 1.26 系列的理由：保持与现有 `go.mod` 与 Dockerfile 一致，首次 `go-toolchain-sync` 会自动提 `1.26 → 1.27` 跨次版本 PR 供你审核（设计稿 §6 留给构建者的决定）。
-- [ ] **2.2 `tools/go.mod` 先做 spike，再定稿**：
+- [x] **2.1 `.go-version`**：写入当前 1.26 系列最新补丁版（`curl -s 'https://go.dev/dl/?mode=json' | python -c ...` 取 `1.26.*` 最新稳定版；`go.mod` 的 `go 1.26.0` 不变）。选 1.26 系列的理由：保持与现有 `go.mod` 与 Dockerfile 一致，首次 `go-toolchain-sync` 会自动提 `1.26 → 1.27` 跨次版本 PR 供你审核（设计稿 §6 留给构建者的决定）。
+- [x] **2.2 `tools/go.mod` 先做 spike，再定稿**：
   ```bash
   mkdir tools && cd tools
   go mod init github.com/containrrr/watchtower/tools   # go 指令与根模块一致
@@ -93,12 +93,12 @@ bash scripts/build-tplprev.sh
   - **实测** 设计稿写法 `go tool -modfile=tools/go.mod staticcheck ./...` 与 `govulncheck ./...`、`goreleaser` 是否可用（见 0.1 第 1 项，尚属待验证假设）。结论写进 PR 描述；仅当设计稿写法确实不可用时才**更新设计稿第 5.2 与 7 节**。
   - 新增脚本 `scripts/tools.sh`（`set -euo pipefail`）统一"构建工具到 `.tools/`"，本地和 CI 共用，避免命令散落。
   - 确认 Dependabot 对 `/tools` 的 `tool` 依赖可见：合入后在 Dependabot 日志里核对（M3）。
-- [ ] **2.3 staticcheck 基线**：`.tools/staticcheck ./...`，修复现有告警（预期很少）。
-- [ ] **2.4 govulncheck 基线**：`.tools/govulncheck ./...`。
+- [x] **2.3 staticcheck 基线**：`.tools/staticcheck ./...`，修复现有告警（预期很少）。
+- [x] **2.4 govulncheck 基线**：`.tools/govulncheck ./...`。
   - 能升级的先升级（如 `golang.org/x/net`），每个升级单独一次 `go get` + `go mod tidy` + `go test ./...`。
   - 剩余无修复的漏洞写入 `.github/govulncheck-exceptions.json`：`[{"id":"GO-xxxx-xxxx","reason":"...","expires":"YYYY-MM-DD"}]`。
   - 新增 `scripts/govulncheck-gate.py`（标准库）：解析 `govulncheck -format json` 输出，已豁免且未过期的放行，其余失败；**过期的豁免本身触发失败**。带单元测试 `scripts/test_govulncheck_gate.py`。
-- [ ] **2.5 GoReleaser v2 迁移 `goreleaser.yml`，并在同一个 PR 内原子切换旧 `release.yml` 的 GoReleaser 调用**：
+- [x] **2.5 GoReleaser v2 迁移 `goreleaser.yml`，并在同一个 PR 内原子切换旧 `release.yml` 的 GoReleaser 调用**：
   - **为什么必须同 PR**：旧 `release.yml` 用 `goreleaser-action` 固定 `v0.155.0`，若 v2 配置先合入、`release.yml` 到 PR 5 才替换，中间任何正式 tag 都会让 v0.155.0 去读 v2 配置而失败或产出错误产物。所以本 PR 同时把旧 `release.yml` 的 `goreleaser-action` + `version: v0.155.0` 步骤替换为"构建 `tools/go.mod` 中的 GoReleaser 并运行 `release --clean`"（只改这一步与 `go-version-file`，其余留给 PR 5）。本 PR 合入后到 PR 5 之间的手动 tag 发布仍可用。
   - 加 `version: 2`、`project_name: watchtower`（避免依赖目录名）。
   - **目标平台按 `v1.0.0` 的 6 个归档显式列出**，不再靠 `goos × goarch − ignore` 推导：`linux/{amd64,386,arm(v6),arm64}` 与 `windows/{amd64,386}`。**必须排除 `windows/arm64`**（现有 `goos×goarch` 加 `ignore: windows/arm` 会多产出 `windows/arm64`，而 `v1.0.0` 没有该资产）。用 `builds[].targets` 或 `ignore: [windows/arm, windows/arm64]` 实现。注意设计稿 §5.1 第 4 条目前写的是"排除 `windows/arm`"，与 `v1.0.0` 契约不符，**需同步修订为"仅 6 个目标，排除 windows/arm 与 windows/arm64"**。
@@ -113,16 +113,16 @@ bash scripts/build-tplprev.sh
     - `dist/watchtower_linux_amd64*/watchtower -v` 输出含注入的版本号。
     - 可选对照：`gh release download v1.0.0 -D <空目录>`，比较归档内文件列表；下载物按不可信数据对待，放独立空目录。
   - 本地与 CI 的契约核对脚本必须在本 PR 通过后才可合入。
-- [ ] **2.6 `docs-requirements.txt` 锁定**：
+- [x] **2.6 `docs-requirements.txt` 锁定**：
   ```bash
   uv pip compile docs-requirements.in --generate-hashes --python-version <钉死的版本> -o docs-requirements.txt
   ```
   - 把现有三项直接依赖（`mkdocs`、`mkdocs-material`、`md-toc`）移到 `docs-requirements.in`（Dependabot `pip` 只读 `requirements*.txt`，所以实际被 Dependabot 维护的是带 hash 的 `docs-requirements.txt`；PR 4 的 `pip` 白名单只允许 `docs-requirements.txt` 改动）。**需实测** Dependabot 对 `uv pip compile` 产物（含 `# via` 注释、`--hash` 续行）的更新行为，不满足就改用 `pip-compile` 输出格式；这项放在 M3 观察首批 `pip` PR 时确认。
   - 钉死文档构建用的 Python 小版本（写入 `.python-version`，供 `actions/setup-python` 的 `python-version-file` 读取）。
   - 验证：干净 venv 里 `pip install --require-hashes -r docs-requirements.txt && bash scripts/build-tplprev.sh && mkdocs build --strict`。
-- [ ] **2.7 Dockerfile 钉 digest**：三个 `dockerfiles/Dockerfile*` 的 `golang:1.26-alpine` → `golang:<.go-version>-alpine@sha256:<digest>`。digest 用 `docker buildx imagetools inspect golang:<ver>-alpine` 获取（多架构索引 digest）。
+- [x] **2.7 Dockerfile 钉 digest**：三个 `dockerfiles/Dockerfile*` 的 `golang:1.26-alpine` → `golang:<.go-version>-alpine@sha256:<digest>`。digest 用 `docker buildx imagetools inspect golang:<ver>-alpine` 获取（多架构索引 digest）。
   - 验证：`docker buildx build --platform linux/amd64,linux/arm64 -f dockerfiles/Dockerfile .`（不推送）；`Dockerfile.self-contained` 与 `Dockerfile.dev-self-contained` 各构建一次。
-- [ ] **2.8 一致性自检脚本** `scripts/check-go-version.py`：断言 `.go-version` 与三个 Dockerfile 的 tag、`go.mod`/`tools/go.mod` 的 `go` 指令次版本一致，CI 里作为一个检查（防止 `go-toolchain-sync` 之外的手改造成漂移）。
+- [x] **2.8 一致性自检脚本** `scripts/check-go-version.py`：断言 `.go-version` 与三个 Dockerfile 的 tag、`go.mod`/`tools/go.mod` 的 `go` 指令次版本一致，CI 里作为一个检查（防止 `go-toolchain-sync` 之外的手改造成漂移）。
 
 **PR 2 验收**
 
@@ -137,22 +137,22 @@ bash scripts/tools.sh && .tools/staticcheck ./... && .tools/govulncheck ./...
 
 ## PR 3：只读 CI 体系与可信发布基础
 
-分支：`chore/auto-maint-3-ci`。注意：此 PR 本身就是新 CI 的第一次真实运行，**作为"必需检查名"的取样来源**。
+分支：`chore/auto-maint-3-ci`。**已合并（#12）。**注意：此 PR 本身就是新 CI 的第一次真实运行，**作为"必需检查名"的取样来源**。
 
-- [ ] **3.1 通用约定**（所有工作流）：顶层 `permissions: {}`；任务级最小权限；`actions/checkout` 一律 `persist-credentials: false`；`actions/setup-go` 用 `go-version-file: .go-version`；所有 `uses:` 钉完整 SHA 并附版本注释。
+- [x] **3.1 通用约定**（所有工作流）：顶层 `permissions: {}`；任务级最小权限；`actions/checkout` 一律 `persist-credentials: false`；`actions/setup-go` 用 `go-version-file: .go-version`；所有 `uses:` 钉完整 SHA 并附版本注释。
   - SHA 获取：`git ls-remote https://github.com/<owner>/<repo> 'refs/tags/<tag>*'`，注意附注 tag 要取 `^{}` 解引用后的 commit SHA，逐个核对。
-- [ ] **3.2 `.github/actions/docker-build/action.yml`**（composite，无权限声明）：输入 `push`、`tags`、`version`、`platforms`、`disable_cache`；封装 `docker/setup-buildx-action` + `docker/build-push-action`，传 `WATCHTOWER_VERSION` 与 OCI 标签。**不装 QEMU**。
-- [ ] **3.3 `ci.yml`**（`workflow_call`，输入 `ref`、`upload_coverage`；`contents: read`）。任务（**名字一旦确定就是必需检查名，后续不要随意改**）：
+- [x] **3.2 `.github/actions/docker-build/action.yml`**（composite，无权限声明）：输入 `push`、`tags`、`version`、`platforms`、`disable_cache`；封装 `docker/setup-buildx-action` + `docker/build-push-action`，传 `WATCHTOWER_VERSION` 与 OCI 标签。**不装 QEMU**。
+- [x] **3.3 `ci.yml`**（`workflow_call`，输入 `ref`、`upload_coverage`；`contents: read`）。任务（**名字一旦确定就是必需检查名，后续不要随意改**）：
   `lint`（staticcheck）、`test`（ubuntu/macos/windows 矩阵）、`mod-check`（根与 `tools` 的 `go mod verify` + `go mod tidy -diff`）、`version-consistency`（2.8）、`vuln`（govulncheck + 2.4 的门控脚本）、`script-tests`（`python -m unittest` 跑 `scripts/` 与 `.github/scripts/` 的测试）、`goreleaser-snapshot`（含 2.5 契约核对）、`docker-build`（只读多架构构建）、`docs-build`（`--require-hashes` + `build-tplprev.sh` + `mkdocs build --strict`）、`workflow-lint`（actionlint + zizmor）。
   - 覆盖率上传：仅在 `upload_coverage` 为真且 `CODECOV_TOKEN` 存在时执行，`fail_ci_if_error: false`。
   - zizmor 接入：用 pip 安装并固定版本 + `--require-hashes`（单独的 `.github/zizmor-requirements.txt`），最低阈值先设"任何发现均失败"，必要豁免逐条写理由到 `.github/zizmor.yml`。
-- [ ] **3.4 `pull-request.yml`**：`pull_request` → `main`；调用 `ci.yml`；`dependency-review` 任务（`contents: read`，`comment-summary-in-pr: never`）；`concurrency: pr-${{ github.event.pull_request.number }}`，`cancel-in-progress: true`。
-- [ ] **3.5 `push-main.yml`**（取代 `release-dev.yaml`）：`push` → `main` + `workflow_dispatch`；调用 `ci.yml`，通过后调用 `docker-publish.yml` 推 `:latest-dev`。
-- [ ] **3.6 `docker-publish.yml`**（取代 `docker.yml`，仅 `workflow_call`）：权限 `contents: read`、`packages: write`、`id-token: write`、`attestations: write`。本 PR 只实现 `:latest-dev` 路径与镜像证明/SBOM；版本 tag 与 `:latest` 的"不覆盖、仅最高版本才推进"逻辑在 PR 5 加入（本 PR 内对 `tag` 输入非空直接报错，防止提前误用）。
-- [ ] **3.7 `codeql-analysis.yml`**：顶层 `permissions: {}`，任务级 `actions: read`、`contents: read`、`security-events: write`；钉 SHA；删除 `git checkout HEAD^2` 步骤。
-- [ ] **3.8 移除 GitHub Pages 发布**：删除 `publish-docs.yml` 并移除 `mkdocs.yml` 中的 `site_url`（不发布 GitHub Pages；`ci.yml` 的只读 `docs-build` 仍运行 `mkdocs build --strict` 校验文档）。
-- [ ] **3.9 `.github/dependabot.yml`** 按设计稿 §5.3：`gomod /`、`gomod /tools`（`allow: dependency-type: all`）、`docker /dockerfiles`（`golang` 忽略 semver 三类更新）、`pip /`、`github-actions /`；各自 `cooldown`（gomod 3/7/30 天，其余 default-days 7）与分组。用 JSON Schema 校验（`check-jsonschema --builtin-schema vendor.dependabot`，装入 `.github/zizmor-requirements.txt` 同类固定文件或 `workflow-lint` 里 pip 固定安装）。
-- [ ] **3.10 删除**：`greetings.yml`、`dependabot-approve.yml`、`release-dev.yaml`、`publish-docs.yml`（不发布 GitHub Pages；`docker.yml` 保留 tag 触发路径至 PR 5）。**旧 `release.yml` 的 GoReleaser 步骤已在 PR 2 切换到 v2，本 PR 不再触碰**（PR 5 整体替换）。
+- [x] **3.4 `pull-request.yml`**：`pull_request` → `main`；调用 `ci.yml`；`dependency-review` 任务（`contents: read`，`comment-summary-in-pr: never`）；`concurrency: pr-${{ github.event.pull_request.number }}`，`cancel-in-progress: true`。
+- [x] **3.5 `push-main.yml`**（取代 `release-dev.yaml`）：`push` → `main` + `workflow_dispatch`；调用 `ci.yml`，通过后调用 `docker-publish.yml` 推 `:latest-dev`。
+- [x] **3.6 `docker-publish.yml`**（取代 `docker.yml`，仅 `workflow_call`）：权限 `contents: read`、`packages: write`、`id-token: write`、`attestations: write`。本 PR 只实现 `:latest-dev` 路径与镜像证明/SBOM；版本 tag 与 `:latest` 的"不覆盖、仅最高版本才推进"逻辑在 PR 5 加入（本 PR 内对 `tag` 输入非空直接报错，防止提前误用）。
+- [x] **3.7 `codeql-analysis.yml`**：顶层 `permissions: {}`，任务级 `actions: read`、`contents: read`、`security-events: write`；钉 SHA；删除 `git checkout HEAD^2` 步骤。
+- [x] **3.8 移除 GitHub Pages 发布**：删除 `publish-docs.yml` 并移除 `mkdocs.yml` 中的 `site_url`（不发布 GitHub Pages；`ci.yml` 的只读 `docs-build` 仍运行 `mkdocs build --strict` 校验文档）。
+- [x] **3.9 `.github/dependabot.yml`** 按设计稿 §5.3：`gomod /`、`gomod /tools`（`allow: dependency-type: all`）、`docker /dockerfiles`（`golang` 忽略 semver 三类更新）、`pip /`、`github-actions /`；各自 `cooldown`（gomod 3/7/30 天，其余 default-days 7）与分组。用 JSON Schema 校验（`check-jsonschema --builtin-schema vendor.dependabot`，装入 `.github/zizmor-requirements.txt` 同类固定文件或 `workflow-lint` 里 pip 固定安装）。
+- [x] **3.10 删除**：`greetings.yml`、`dependabot-approve.yml`、`release-dev.yaml`、`publish-docs.yml`（不发布 GitHub Pages；`docker.yml` 保留 tag 触发路径至 PR 5）。**旧 `release.yml` 的 GoReleaser 步骤已在 PR 2 切换到 v2，本 PR 不再触碰**（PR 5 整体替换）。
 
 **PR 3 验收**
 
@@ -304,11 +304,12 @@ go tool -modfile=tools/go.mod actionlint && zizmor --min-severity low .github/
 - [x] **5.3 `docker-publish.yml` 补全**：版本 tag 存在性检查（已存在则比对 `(tag, sha, digest)` 记录，不一致即失败）；SBOM；仅在串行锁内核实该 `tag` 是 `main` 上最高正式版本、版本镜像与证明就绪后才推进 `:latest`；禁用 Buildx 缓存。
 - [x] **5.4 `scheduled-release.yml`**：每周二 03:23 UTC + `workflow_dispatch`；判定、验证、打 tag、发布四段按设计稿 §5.2 实现；发布路径白名单判定（Go 源码、`go.mod`/`go.sum`、`tools/go.*`、`.go-version`、`dockerfiles/**`、`goreleaser.yml`、`.github/workflows/release.yml` 等，排除 `docs/**`、`*.md`、模板、CODEOWNERS）做成可测试的 Python 函数（`.github/scripts/release_paths.py` + 单元测试）。
 - [x] **5.5 README** 增加 `gh attestation verify` 校验说明（二进制与镜像）。
-- [ ] **5.6 彩排（必须）**：发布会推公开的 tag 与 `:latest`，一旦错了无法撤回（所有宿主机会自动拉取）。因此：
+- [x] **5.6 彩排（必须）**：发布会推公开的 tag 与 `:latest`，一旦错了无法撤回（所有宿主机会自动拉取）。因此：
   - 先在**一个临时私有副本仓库**或用 `workflow_dispatch` 的 dry-run 开关（不创建 tag、不推 GHCR，只跑到 snapshot 与 `docker build`）走通；
   - 真实首次发布用 `workflow_dispatch` 手动触发，并在 `main-checks` 已启用的状态下进行；
   - 首次发布版本应是 `v1.0.1`（`v1.0.0` 之后的第一个补丁）。
   - **2026-11-26 状态**：本地 GoReleaser snapshot（8 归档）与 4 架构 Linux Docker（`--no-push`）已在 #34 验证通过；`main` 上的 `scheduled-release.yml` 托管彩排（`dry_run=true`，run `45745244198`）已通过（`dry-run-docker` 2m8s、`dry-run-snapshot` 5m37s，`plan` / `ci` / `publish` 按预期 `skipped`）。最新正式版本仍为 `v1.0.0`；OIDC 签名、GHCR 推送、`:latest` 推进与发布幂等性留待维护者确认后的首次正式发布（`v1.0.1`，`dry_run=false`）验证。
+  - **2026-11-27 状态**：首次正式发布 `v1.0.1`（run `45937413435`，`1386a45`，`dry_run=false`）已通过，8 个归档、校验和、`release-record.json`、GHCR `1.0.1` / `latest` 与 `gh attestation verify` 均核验通过（详见 M3 记录）。随后维护者再次触发 `scheduled-release.yml`（run `45940072860`，`1386a45`，`dry_run=false`）验证幂等性：`plan` 输出 `{"mode": "skip", "sha": "", "tag": ""}`，`dry-run-docker`、`dry-run-snapshot`、`ci`、`publish` 均 `skipped`，远端 tag 与 Release 无任何变更。
 
 **PR 5 验收**
 
@@ -346,10 +347,11 @@ python -I -m unittest discover -s .github/scripts -v
       - #50（`tools-minor-patch`，174 项）：run `45809263058` 与 `45828349834` 以 `go.mod changes a directive other than require` 拒绝，PR 把 `tools/go.mod` 的 `go 1.27.0` 改成了 `go 1.27.4`；维护者手动合并。
       - run `45804242241` 输出 `go_modules update changes tools/actionlint/go.mod`：#46 拆出的 `tools/actionlint` 模块不在校验器允许的文件范围内。按时间对应 #48（当时同目录的 #49 也处于打开状态）；#48 由维护者手动合并。维护者于 2026-11-27 同意把该目录纳入允许范围：校验器的文件白名单加入 `tools/actionlint/go.mod`/`go.sum`，分组对应关系加入 `tools/actionlint` → `actionlint-minor-patch`；用 #48 的签名提交 `fd6d371` 离线回放，`go.mod` 变更与分组信号均通过。
       - #39–#50 中已合并的 PR 均由维护者合并，尚无 PR 由 `watchtower-automerge` 合入。
-- [ ] 手动触发 `scheduled-release.yml`：固定 SHA → CI → tag → GoReleaser v2 → GHCR + 证明全链路通过。
+- [x] 手动触发 `scheduled-release.yml`：固定 SHA → CI → tag → GoReleaser v2 → GHCR + 证明全链路通过。
   - **2026-11-26 状态**：`main` 上的 `dry_run=true` 托管彩排（run `45745244198`）已通过；待维护者确认后触发正式发布 `v1.0.1`（`dry_run=false`）验证全链路。
   - **2026-11-27 首次正式发布尝试**：维护者手动触发 run `45930402720`（`78fe0b0`，`dry_run=false`）。`plan`、发布前 CI 与 GoReleaser 构建通过，`publish / archives` 在 `stage-assets` 失败：`release_gh.save` 更新草稿日志时请求未带 tag 名，GitHub 把尚无 tag 的草稿改名为 `untagged-…`，脚本按“日志与 release 元数据不一致”中止。此时未创建 tag、未上传归档、未推送镜像，`:latest` 未变；留下草稿 release `460109181`（日志已记录 8 个归档哈希）。修复为 `save` 每次都带上 tag 名；dry-run 彩排不经过这条路径，所以此前没有暴露。重新触发前，该草稿由维护者决定改回 `v1.0.1` 或删除。
   - **2026-11-27 第二次尝试**：草稿删除、#54 合入后，维护者触发 run `45933240985`（`777fa2a`，`dry_run=false`）。tag 名修复生效：`stage-assets` 通过，创建了带标记的 `v1.0.1` tag（指向 `777fa2a`），草稿 release `460127112` 上传了 10 个资产；随后 `archive-attestations` 失败——尚无证明的摘要查询 `attestations/sha256:<digest>` 时 GitHub 返回 404，而 `release_gh.api` 把 404 当作错误。镜像、`:latest` 与发布均未进行。修复：`release_gh.api` 新增 `missing_ok`，仅在该查询上把 404 视为“无证明”，归入待证明列表。
+  - **2026-11-27 第三次尝试（成功）**：草稿与旧 tag 删除、#55 合入后，维护者触发 run `45937413435`（`1386a45`，`dry_run=false`），全链路通过：创建带标记的 `v1.0.1` tag（指向 `1386a45973ae00034abd799e26cfab3e40a9b2ab`）；正式发布 GitHub Release `v1.0.1`（ID `460153642`，10 个资产：8 个平台归档、`watchtower_1.0.1_checksums.txt`、`release-record.json`）；GHCR `1.0.1` 与 `latest` 均指向 `sha256:1319c7ee8a0472fc1e9f47e6038bbc1f22834e37036a84e17655644a167d2390`；本地 `gh attestation verify` 对 `watchtower_linux_amd64.tar.gz`（证明主题覆盖全部 8 个归档及校验和）与 GHCR `1.0.1` / `latest` 镜像均校验通过。
 - [ ] Actions 页确认 `go-toolchain-sync.yml` 与 `scheduled-release.yml` 为 `active`；把"60 天无活动会被停用"写进你的日历提醒（`scheduled-release` 本身不产生活动，合入频繁时自然续期，但无新提交时需要关注）。
   - **2026-11-26 已核实**：`gh workflow list --all` 确认 `Go Toolchain Sync` 与 `Scheduled release` 均为 `active`；日历提醒待维护者自行设置。
 - [x] 负面验收：验证**非机器人 PR 不会被自动合并**。**维护者于 2026-11-26 调整验收标准**：非管理员的 `main-review` 验收仅做只读配置和代码核查，不做账号实测。
