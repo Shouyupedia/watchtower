@@ -34,7 +34,7 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
 
 **非目标**
 
-- 不改 Go 模块路径 `github.com/containrrr/watchtower`。改它要动全部 Go 文件，用户感知不到，适合以后单独做。
+- 不改 Go 模块路径 `github.com/containrrr/watchtower`。改它要动全部 Go 文件，用户感知不到，适合以后单独做。（注：已在后续脱离上游变更中完成改名为 `github.com/shouyupedia/watchtower`。）
 - 不改容器标签 `com.centurylinklabs.watchtower*`。这是运行时协议，改了会让现有部署失效。
 - 不改测试夹具（`pkg/container/mocks/data/*.json`）里出现的上游镜像名。它们只是测试数据。
 - 不改 mkdocs 主题里的配色方案名 `containrrr`。这是 CSS 内部标识符，用户看不到。
@@ -303,5 +303,5 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
 
 ## 9. 后续工作（本次不做）
 
-- 评估 Go 模块路径 `github.com/containrrr/watchtower` 改名。
+- ~~评估 Go 模块路径 `github.com/containrrr/watchtower` 改名。~~（已完成，改为 `github.com/shouyupedia/watchtower`。）
 - 若未来引入独立日常开发账号或多人协作，可将 `main-review` 规则集中的 `Repository admin` 绕过移除（收紧为方法 A），实现连管理员自提 PR 也必须经另一独立身份审批。

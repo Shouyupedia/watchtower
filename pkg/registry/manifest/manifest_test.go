@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/containrrr/watchtower/internal/actions/mocks"
-	"github.com/containrrr/watchtower/pkg/registry/manifest"
 	"github.com/moby/moby/api/types/image"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/shouyupedia/watchtower/internal/actions/mocks"
+	"github.com/shouyupedia/watchtower/pkg/registry/manifest"
 )
 
 func TestManifest(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/containrrr/watchtower/pkg/container"
-	"github.com/containrrr/watchtower/pkg/types"
+	"github.com/shouyupedia/watchtower/pkg/container"
+	"github.com/shouyupedia/watchtower/pkg/types"
 )
 
 type failedInspectClient struct {

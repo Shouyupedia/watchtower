@@ -1,11 +1,11 @@
 package container
 
 import (
-	"github.com/containrrr/watchtower/pkg/types"
 	dc "github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/shouyupedia/watchtower/pkg/types"
 )
 
 var _ = Describe("the container", func() {

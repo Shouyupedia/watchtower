@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/containrrr/watchtower/pkg/registry/digest"
+	"github.com/shouyupedia/watchtower/pkg/registry/digest"
 )
 
 func TestDigestRejectsUntrustedTLS(t *testing.T) {

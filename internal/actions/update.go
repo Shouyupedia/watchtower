@@ -3,12 +3,12 @@ package actions
 import (
 	"errors"
 
-	"github.com/containrrr/watchtower/internal/util"
-	"github.com/containrrr/watchtower/pkg/container"
-	"github.com/containrrr/watchtower/pkg/lifecycle"
-	"github.com/containrrr/watchtower/pkg/session"
-	"github.com/containrrr/watchtower/pkg/sorter"
-	"github.com/containrrr/watchtower/pkg/types"
+	"github.com/shouyupedia/watchtower/internal/util"
+	"github.com/shouyupedia/watchtower/pkg/container"
+	"github.com/shouyupedia/watchtower/pkg/lifecycle"
+	"github.com/shouyupedia/watchtower/pkg/session"
+	"github.com/shouyupedia/watchtower/pkg/sorter"
+	"github.com/shouyupedia/watchtower/pkg/types"
 	log "github.com/sirupsen/logrus"
 )
 

@@ -3,15 +3,15 @@ package actions_test
 import (
 	"time"
 
-	"github.com/containrrr/watchtower/internal/actions"
-	"github.com/containrrr/watchtower/pkg/types"
 	dockerContainer "github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/network"
+	"github.com/shouyupedia/watchtower/internal/actions"
+	"github.com/shouyupedia/watchtower/pkg/types"
 
-	. "github.com/containrrr/watchtower/internal/actions/mocks"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	. "github.com/shouyupedia/watchtower/internal/actions/mocks"
 )
 
 func getCommonTestData(keepContainer string) *TestData {
