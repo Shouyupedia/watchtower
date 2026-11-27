@@ -111,7 +111,16 @@ SENSITIVE_PREFIXES = (
 )
 SENSITIVE_BASENAMES = frozenset({"CODEOWNERS", "dependabot.yml", "dependabot.yaml"})
 
-GO_MODULE_FILES = frozenset({"go.mod", "go.sum", "tools/go.mod", "tools/go.sum"})
+GO_MODULE_FILES = frozenset(
+    {
+        "go.mod",
+        "go.sum",
+        "tools/go.mod",
+        "tools/go.sum",
+        "tools/actionlint/go.mod",
+        "tools/actionlint/go.sum",
+    }
+)
 PIP_FILE = "docs-requirements.txt"
 DOCKER_DIR = "dockerfiles/"
 GO_VERSION_FILE = ".go-version"
@@ -186,7 +195,11 @@ CALIBRATED_NORMAL_UPDATE_SIGNALS: frozenset[str] = frozenset(
 
 DEPENDABOT_CONFIG_FILE = ".github/dependabot.yml"
 # Version-update groups in dependabot.yml, keyed by Go module root.
-GO_VERSION_UPDATE_GROUPS = {".": "go-minor-patch", "tools": "tools-minor-patch"}
+GO_VERSION_UPDATE_GROUPS = {
+    ".": "go-minor-patch",
+    "tools": "tools-minor-patch",
+    "tools/actionlint": "actionlint-minor-patch",
+}
 GROUP_UPDATE_TYPES = frozenset(
     {"version-update:semver-minor", "version-update:semver-patch"}
 )
@@ -1478,10 +1491,10 @@ def _validate_dependabot_go_modules(
             f"go_modules update changes {_safe(change.path)}",
         )
         _require_modified_mode(change)
-    roots = {"tools" if change.path.startswith("tools/") else "." for change in changes}
+    roots = {change.path.rpartition("/")[0] or "." for change in changes}
     _require(len(roots) == 1, "go_modules update touches both module roots")
     root = roots.pop()
-    prefix = "" if root == "." else "tools/"
+    prefix = "" if root == "." else f"{root}/"
     go_mod = f"{prefix}go.mod"
     go_sum = f"{prefix}go.sum"
     changed_paths = {change.path for change in changes}

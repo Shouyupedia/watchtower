@@ -788,7 +788,14 @@ class ConstantsTests(AutomergeTestCase):
         )
         self.assertEqual(
             av.GO_MODULE_FILES,
-            {"go.mod", "go.sum", "tools/go.mod", "tools/go.sum"},
+            {
+                "go.mod",
+                "go.sum",
+                "tools/go.mod",
+                "tools/go.sum",
+                "tools/actionlint/go.mod",
+                "tools/actionlint/go.sum",
+            },
         )
         self.assertEqual(av.PIP_FILE, "docs-requirements.txt")
         self.assertEqual(av.GOLANG_DOCKERFILES, GOLANG_DOCKERFILES)
@@ -1926,6 +1933,41 @@ class GroupSignalTests(AutomergeTestCase):
             scenario.verify(signals=CALIBRATED),
             "update-kind signal dependabot-group-v1 is not enabled",
         )
+
+    def test_nested_tool_module_uses_its_own_group(self) -> None:
+        group = "actionlint-minor-patch"
+        root = "tools/actionlint"
+        config = GROUP_CONFIG + (
+            f'  - package-ecosystem: "gomod"\n    directory: "/{root}"\n'
+            f"    groups:\n      {group}:\n        update-types:\n"
+            '          - "minor"\n'
+        )
+        message = group_commit_message(
+            [("example.com/mod", "version-update:semver-patch", group)]
+        )
+        own_branch = f"dependabot/go_modules/{root}/{group}-0123456789"
+        cases = (
+            (own_branch, None),
+            (
+                "dependabot/go_modules/tools/tools-minor-patch-0123456789",
+                "is not the actionlint-minor-patch group branch",
+            ),
+        )
+        for branch, reason in cases:
+            with self.subTest(branch=branch):
+                scenario = self.group_scenario(
+                    message=message, config=config, branch=branch
+                )
+                for name in ("go.mod", "go.sum"):
+                    scenario.base_files[f"{root}/{name}"] = scenario.base_files[name]
+                    scenario.head_files[f"{root}/{name}"] = scenario.head_files[name]
+                    scenario.head_files[name] = scenario.base_files[name]
+                scenario.rebuild()
+                decision = scenario.verify(signals=frozenset({GROUP_SIGNAL}))
+                if reason is None:
+                    self.assertEligible(decision, pr_number=42, head_sha=HEAD_SHA)
+                else:
+                    self.assertRejected(decision, reason)
 
     def test_group_metadata_must_match_trusted_group_and_diff(self) -> None:
         patch = "version-update:semver-patch"
