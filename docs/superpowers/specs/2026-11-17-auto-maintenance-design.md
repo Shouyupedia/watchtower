@@ -113,7 +113,7 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
      - **完整提交列表与签名校验**：分页拉取 PR 的全部提交并核对条数等于 `pr.commits`；要求每一个提交都满足 `commit.verification.verified == true`、`author.login` 等于该 PR 作者机器人，且 `committer.login` 仅限 `web-flow` 或该机器人本身。**禁止调用 `update-branch` 向自动 PR 注入合并提交**（否则会引入非机器人提交破坏签名链）。
      - **拒绝安全更新（含校准边界）**：核查 PR 不关联 Dependabot 安全告警，也不带 security 相关标签或安全更新元数据，且必须命中经过真实样本校准的普通更新正向信号。4.1a 真实样本回放表明，两类更新均能命中 `dependabot-body-v1`，因此正文信号绝不加入白名单，所有逐包 Dependabot PR 继续转人工审核。当前 `CALIBRATED_NORMAL_UPDATE_SIGNALS` 仅启用 `dependabot-group-v1`，它只适用于 `go_modules`，读取 head 上唯一签名提交里的 `updated-dependencies` 元数据，并要求同时满足以下条件：
        - 元数据块完整，没有被截断。
-       - 每个条目都属于该模块根目录对应的版本更新组（`/` 对应 `go-minor-patch`，`/tools` 对应 `tools-minor-patch`，对应关系写死在校验器中），`update-type` 只能是 minor 或 patch，且条目列出的模块必须在 `go.mod` 中实际升级。
+       - 每个条目都属于该模块根目录对应的版本更新组（`/` 对应 `go-minor-patch`，`/tools` 对应 `tools-minor-patch`，`/tools/actionlint` 对应 `actionlint-minor-patch`，对应关系写死在校验器中），`update-type` 只能是 minor 或 patch，且条目列出的模块必须在 `go.mod` 中实际升级。
        - 反过来不作要求：Dependabot 不会在元数据中列出连带升级的传递依赖，因此 `go.mod` 中升级了但元数据未列出的模块不会导致拒绝。这些模块仍须通过 `go.mod` 的升级规则和冷却期核验。
        - 分支名与组名、目录严格一致。
        - merge base 上的 `dependabot.yml` 中有以该组名为键的行，且全文不出现 `applies-to` 或 `security-updates`。校验器只做这两项文本检查，不解析该组属于哪个生态或目录；组与目录的对应由上一条的分支名和写死的对应关系保证。
@@ -122,7 +122,7 @@ watchtower 镜像运行时挂载 `docker.sock`，权限等同宿主机 root。�
      - **敏感路径硬禁区**：PR 修改的文件列表中绝对禁止出现 `.github/workflows/**`、`.github/actions/**`、`.github/scripts/**`、`.github/CODEOWNERS`、`.github/dependabot.yml`（及任意路径下的 `CODEOWNERS`、`dependabot.yml`、`dependabot.yaml`）。
      - **按机器人与生态执行精确文件及行级 diff 白名单**：
        - **当作者为 `dependabot[bot]` 时**，从 `head.ref` 前缀解析生态，仅允许 `go_modules`、`docker`、`pip`（`github_actions` 永远返回 `eligible=false`）：
-         - `go_modules`：改动文件仅限 `go.mod`/`go.sum` 或 `tools/go.mod`/`tools/go.sum`。解析新旧 `go.mod`，禁止更改 `require` 以外的指令。现有模块只允许补丁版或次版本升级，升级或新增的模块均须通过可信首次公开可见时间冷却期核验。删除 `require` 条目仅限基线中标有 `// indirect` 的模块，且同一个 PR 必须至少升级一个现有模块并通过全部必需检查，包括运行 `go mod tidy -diff` 的 `CI / mod-check`。
+         - `go_modules`：改动文件仅限 `go.mod`/`go.sum`、`tools/go.mod`/`tools/go.sum` 或 `tools/actionlint/go.mod`/`tools/actionlint/go.sum`，且一个 PR 只能改其中一个模块根目录。解析新旧 `go.mod`，禁止更改 `require` 以外的指令。现有模块只允许补丁版或次版本升级，升级或新增的模块均须通过可信首次公开可见时间冷却期核验。删除 `require` 条目仅限基线中标有 `// indirect` 的模块，且同一个 PR 必须至少升级一个现有模块并通过全部必需检查，包括运行 `go mod tidy -diff` 的 `CI / mod-check`。
          - `docker`：改动文件仅限 `dockerfiles/Dockerfile*`；仅允许既有 `FROM` 行的 `@sha256:...` digest 变化，镜像名与标签保持一字不差，不允许改动其他行，且通过 Docker Hub 7 天冷却期核验。
          - `pip`：改动文件仅限 `docs-requirements.txt`；仅允许既有/传递包的补丁版或次版本升级，每个包条目必须附带 `--hash=sha256:...`，不允许引入额外安装源参数（如 `--index-url`、`--extra-index-url`、git URL），且通过 PyPI 7 天冷却期核验。
        - **当作者为 `watchtower-updater[bot]` 时**（Go 工具链同步 PR）：

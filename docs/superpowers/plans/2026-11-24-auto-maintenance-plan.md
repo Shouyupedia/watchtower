@@ -343,7 +343,7 @@ python -I -m unittest discover -s .github/scripts -v
     - **2026-11-27 核对（启用分组信号后的线上 PR）**：
       - #47（`go-minor-patch`，head `b8c7334`，Dependabot 签名）是首个线上 Go 分组 PR。Automerge run `45829612597` 走到冷却期核验，因 `github.com/spf13/pflag@v1.1.0` 在 10 次请求内无可信首次可见记录输出 `eligible=false`；维护者批准后手动合并（`63f0ccc`）。4.2 的 2026-11-27 改进针对的就是这一拒绝原因。
       - #50（`tools-minor-patch`，174 项）：run `45809263058` 与 `45828349834` 以 `go.mod changes a directive other than require` 拒绝，PR 把 `tools/go.mod` 的 `go 1.27.0` 改成了 `go 1.27.4`；维护者手动合并。
-      - run `45804242241` 输出 `go_modules update changes tools/actionlint/go.mod`：#46 拆出的 `tools/actionlint` 模块不在校验器允许的文件范围内。按时间对应 #48（当时同目录的 #49 也处于打开状态）；#48 由维护者手动合并。是否把该目录纳入允许范围待维护者决定。
+      - run `45804242241` 输出 `go_modules update changes tools/actionlint/go.mod`：#46 拆出的 `tools/actionlint` 模块不在校验器允许的文件范围内。按时间对应 #48（当时同目录的 #49 也处于打开状态）；#48 由维护者手动合并。维护者于 2026-11-27 同意把该目录纳入允许范围：校验器的文件白名单加入 `tools/actionlint/go.mod`/`go.sum`，分组对应关系加入 `tools/actionlint` → `actionlint-minor-patch`；用 #48 的签名提交 `fd6d371` 离线回放，`go.mod` 变更与分组信号均通过。
       - #39–#50 中已合并的 PR 均由维护者合并，尚无 PR 由 `watchtower-automerge` 合入。
 - [ ] 手动触发 `scheduled-release.yml`：固定 SHA → CI → tag → GoReleaser v2 → GHCR + 证明全链路通过。
   - **2026-11-26 状态**：`main` 上的 `dry_run=true` 托管彩排（run `45745244198`）已通过；待维护者确认后触发正式发布 `v1.0.1`（`dry_run=false`）验证全链路。
