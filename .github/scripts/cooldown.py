@@ -12,12 +12,16 @@ Trust model
 -----------
 * Go modules: ``index.golang.org`` is an append-only, time ordered index of
   module versions first served by the public proxy.  It cannot be queried by
-  module, so the proxy's ``.info`` ``Time`` is used *only* as a start hint for
-  a bounded forward scan.  The returned value is always the ``Timestamp`` of
-  the exact ``(Path, Version)`` entry in the index.  A forged or backdated
-  ``.info`` time can therefore only make the lookup return
-  :class:`CooldownError` (not found); it can never produce an earlier trusted
-  time.
+  module, so two *untrusted locating hints* narrow down where to read it:
+  the proxy's ``.info`` ``Time`` starts a short forward scan, and when that
+  misses, record ids from ``sum.golang.org/lookup`` steer a bisection over
+  index time (checksum-database records are numbered in roughly the order
+  the proxy first served them).  The returned value is always the
+  ``Timestamp`` of the exact ``(Path, Version)`` entry read from the index.
+  A forged ``.info`` time or a wrong, missing or misleading checksum-database
+  id can therefore only make the lookup raise :class:`CooldownError` (not
+  found), or land on a later duplicate entry; it can never produce a time
+  earlier than a real index record for that exact version.
 * Docker: Docker Hub's ``tag_last_pushed`` for the exact tag, together with
   the tag's registry digest.
 * PyPI: the registry-side ``upload_time_iso_8601`` of every file whose sha256
@@ -59,15 +63,27 @@ MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 INDEX_URL = "https://index.golang.org/index"
 PROXY_URL = "https://proxy.golang.org"
+SUMDB_URL = "https://sum.golang.org"
 DOCKER_HUB_URL = "https://hub.docker.com/v2/repositories"
 PYPI_URL = "https://pypi.org/pypi"
 
-# One proxy hint plus up to nine index pages.  The index page size is capped
-# by the service at 2000 entries.  A version whose first proxy fetch happened
-# long after its commit time may not be locatable within this bound; that is a
-# deliberate fail-closed outcome, not an error to retry.
-DEFAULT_MAX_REQUESTS = 10
+# Hard cap on every request one lookup may make: the proxy hint, the forward
+# scan, the checksum-database lookups, the bisection probes and the final
+# scan.  A version that cannot be located within this bound is a deliberate
+# fail-closed outcome, not an error to retry.
+DEFAULT_MAX_REQUESTS = 40
+# The index page size is capped by the service at 2000 entries.
 INDEX_PAGE_LIMIT = 2000
+# Full pages read forward from the hint before falling back to bisection.
+FORWARD_SCAN_PAGES = 2
+# Each bisection probe reads a few index rows and asks the checksum database
+# for the record id of the first one it can resolve.
+BISECT_PROBE_LIMIT = 5
+BISECT_PROBE_ROWS = 3
+# Bisection stops at this window; the final scan then reads it with a margin
+# on both sides because index time and record-id order only roughly agree.
+BISECT_WINDOW = timedelta(minutes=20)
+BISECT_MARGIN = timedelta(minutes=20)
 # Start the scan slightly before the commit time so clock skew and second
 # truncation cannot skip an entry.  A forged earlier hint only costs pages.
 HINT_SKEW = timedelta(seconds=60)
@@ -258,21 +274,148 @@ def _parse_index_page(raw):
     return entries
 
 
+class _BudgetExhausted(CooldownError):
+    """The per-lookup request budget ran out."""
+
+
+class _BudgetedGet:
+    """Wrap an :data:`HttpGet` so one lookup cannot exceed its request cap."""
+
+    def __init__(self, http_get, limit, what):
+        self._http_get = http_get
+        self._limit = limit
+        self._what = what
+        self.used = 0
+
+    def __call__(self, url):
+        if self.used >= self._limit:
+            raise _BudgetExhausted(
+                f"index.golang.org has no trusted record for {self._what} "
+                f"within {self._limit} request(s)"
+            )
+        self.used += 1
+        return self._http_get(url)
+
+
+def _go_escaped(module, version):
+    return (
+        urllib.parse.quote(_go_escape(module), safe="/+.-_~"),
+        urllib.parse.quote(_go_escape(version), safe="+.-_~"),
+    )
+
+
+def _index_page(get, since, limit):
+    query = urllib.parse.urlencode({"since": _format_rfc3339(since), "limit": limit})
+    return _parse_index_page(get(f"{INDEX_URL}?{query}"))
+
+
+def _scan_index(get, module, version, since, *, max_pages=None, stop_after=None):
+    """Scan full index pages forward from ``since`` for the exact entry.
+
+    Returns ``(timestamp, None)`` on a match.  Otherwise returns
+    ``(None, resume)`` where ``resume`` is where an unfinished scan stopped
+    (``max_pages`` reached), or ``None`` when the scan is conclusive: the
+    index ended or ``stop_after`` was passed.
+    """
+    previous_last = None
+    pages = 0
+    while max_pages is None or pages < max_pages:
+        entries = _index_page(get, since, INDEX_PAGE_LIMIT)
+        pages += 1
+        if not entries:
+            return None, None
+        for path, entry_version, timestamp in entries:
+            if path == module and entry_version == version:
+                return timestamp, None
+        last_timestamp = entries[-1][2]
+        if previous_last is not None and last_timestamp <= previous_last:
+            raise CooldownError("index pagination made no forward progress")
+        previous_last = last_timestamp
+        if len(entries) < INDEX_PAGE_LIMIT:
+            return None, None
+        if stop_after is not None and last_timestamp > stop_after:
+            return None, None
+        since = last_timestamp
+    return None, since
+
+
+def _sumdb_record_id(get, module, version):
+    """Return the checksum-database record id of ``module@version``.
+
+    The id is an untrusted locating hint; it is never used as evidence.
+    """
+    escaped_module, escaped_version = _go_escaped(module, version)
+    raw = get(f"{SUMDB_URL}/lookup/{escaped_module}@{escaped_version}")
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except (UnicodeDecodeError, AttributeError) as exc:
+        raise CooldownError("checksum database response is not valid UTF-8") from exc
+    if (
+        len(lines) < 2
+        or not re.fullmatch(r"[0-9]{1,18}", lines[0])
+        or not lines[1].startswith(f"{module} {version} ")
+    ):
+        raise CooldownError(
+            f"checksum database returned no record for {module}@{version}"
+        )
+    return int(lines[0])
+
+
+def _bisect_index(get, module, version, lo, hi):
+    """Locate the exact index entry between ``lo`` and ``hi`` by bisection."""
+    target_id = _sumdb_record_id(get, module, version)
+    while hi - lo > BISECT_WINDOW:
+        mid = (lo + (hi - lo) / 2).replace(microsecond=0)
+        entries = _index_page(get, mid, BISECT_PROBE_LIMIT)
+        if not entries:
+            hi = mid
+            continue
+        probe_id = None
+        for path, entry_version, timestamp in entries[:BISECT_PROBE_ROWS]:
+            if path == module and entry_version == version:
+                return timestamp
+            try:
+                probe_id = _sumdb_record_id(
+                    get, _validate_go_module(path), _validate_go_version(entry_version)
+                )
+            except _BudgetExhausted:
+                raise
+            except CooldownError:
+                continue
+            break
+        if probe_id is None:
+            raise CooldownError(
+                f"cannot order index entries near {_format_rfc3339(mid)} "
+                f"while locating {module}@{version}"
+            )
+        if probe_id < target_id:
+            lo = mid
+        else:
+            hi = mid
+    found, _ = _scan_index(
+        get, module, version, lo - BISECT_MARGIN, stop_after=hi + BISECT_MARGIN
+    )
+    return found
+
+
 def go_first_seen(
     module: str,
     version: str,
     *,
     http_get: HttpGet = http_get,
     max_requests: int = DEFAULT_MAX_REQUESTS,
+    now: datetime | None = None,
 ) -> datetime:
     """Return the trusted first-public-visibility time of a Go module version.
 
     The value comes from the exact ``(Path, Version)`` record in
-    ``index.golang.org``.  The proxy ``.info`` ``Time`` is used only to pick
-    the start of a bounded forward scan; it is never returned.
+    ``index.golang.org``.  The proxy ``.info`` ``Time`` and the checksum
+    database record ids only decide *where* in the index to read; neither is
+    ever returned.
 
-    ``max_requests`` counts the proxy hint request plus every index page
-    request.  A lookup that needs more than the bound fails closed.
+    ``max_requests`` is a hard cap on every request this lookup makes (proxy,
+    index and checksum database).  A lookup that needs more fails closed.
+    ``now`` bounds the bisection and defaults to the current time.
     """
     module = _validate_go_module(module)
     version = _validate_go_version(version)
@@ -280,48 +423,35 @@ def go_first_seen(
         raise CooldownError("max_requests must be an integer")
     if max_requests < 1:
         raise CooldownError("max_requests must be at least 1")
+    if now is None:
+        now = datetime.now(timezone.utc)
+    if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+        raise CooldownError("now must be a timezone-aware datetime")
 
-    escaped_module = urllib.parse.quote(
-        _go_escape(module), safe="/+.-_~"
+    get = _BudgetedGet(http_get, max_requests, f"{module}@{version}")
+    escaped_module, escaped_version = _go_escaped(module, version)
+    info = _load_json_object(
+        get(f"{PROXY_URL}/{escaped_module}/@v/{escaped_version}.info"),
+        "proxy .info response",
     )
-    escaped_version = urllib.parse.quote(_go_escape(version), safe="+.-_~")
-    info_url = f"{PROXY_URL}/{escaped_module}/@v/{escaped_version}.info"
-
-    requests_made = 1
-    info = _load_json_object(http_get(info_url), "proxy .info response")
     if info.get("Version") != version:
         raise CooldownError(
             f"proxy .info returned version {info.get('Version')!r} "
             f"for requested {version!r}"
         )
     hint = _parse_timestamp(info.get("Time"), "proxy .info Time")
-    since = hint - HINT_SKEW
 
-    previous_last = None
-    while requests_made < max_requests:
-        query = urllib.parse.urlencode(
-            {"since": _format_rfc3339(since), "limit": INDEX_PAGE_LIMIT}
-        )
-        raw = http_get(f"{INDEX_URL}?{query}")
-        requests_made += 1
-        entries = _parse_index_page(raw)
-        if not entries:
-            break
-        for path, entry_version, timestamp in entries:
-            if path == module and entry_version == version:
-                return timestamp
-        last_timestamp = entries[-1][2]
-        if previous_last is not None and last_timestamp <= previous_last:
-            raise CooldownError("index pagination made no forward progress")
-        previous_last = last_timestamp
-        if len(entries) < INDEX_PAGE_LIMIT:
-            break
-        since = last_timestamp
-
-    raise CooldownError(
-        f"index.golang.org has no trusted record for {module}@{version} "
-        f"within {requests_made} request(s)"
+    found, resume = _scan_index(
+        get, module, version, hint - HINT_SKEW, max_pages=FORWARD_SCAN_PAGES
     )
+    if found is None and resume is not None:
+        found = _bisect_index(get, module, version, resume, now.astimezone(timezone.utc))
+    if found is None:
+        raise CooldownError(
+            f"index.golang.org has no trusted record for {module}@{version} "
+            f"within {get.used} request(s)"
+        )
+    return found
 
 
 def _validate_docker_repository(repository):
