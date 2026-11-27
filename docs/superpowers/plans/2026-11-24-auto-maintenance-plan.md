@@ -322,12 +322,13 @@ python -I -m unittest discover -s .github/scripts -v
 
 ## M3：端到端验收（设计稿 §8 第 7、8 项）
 
-- [ ] 手动触发 `go-toolchain-sync.yml`：生成 `1.26 → 1.27` PR，提交显示 Verified，`automerge.yml` 输出 `eligible=false`，被 `main-review` 拦下；你 Approve 后合入。
+- [ ] 工具链跨次版本路径（等上游 `1.28`）：`go-toolchain-sync.yml` 生成 `1.27 → 1.28` PR，提交显示 Verified，`automerge.yml` 输出 `eligible=false`，被 `main-review` 拦下；你 Approve 后合入。原定的 `1.26 → 1.27` 路径已无法验收，**维护者于 2026-11-27 调整验收标准**：拆成本项与下一项，各自等上游版本自然触发，不回退 `.go-version` 重演。
   - **2026-11-26 核验**：
     - #42 合入后的 [push 运行 45766579851](https://github.com/Shouyupedia/watchtower/actions/runs/45766579851) 在 `529ef31` 返回 `needs_sync=false`，原因是没有已打开的工具链 PR 可重放；`sync` 跳过。这条路径不检查新版本，不能替代手动验收。
     - 手动触发的托管 [workflow_dispatch 运行 45767406129](https://github.com/Shouyupedia/watchtower/actions/runs/45767406129)（`529ef31`）已完成：`Check Go toolchain updates` 为 `success`，`Sync Go toolchain PR` 为 `skipped`，未创建 PR。脚本检测到当前 `1.26.11`、目标 `1.27.4`（`cross_minor: true`），但 `index.golang.org` 在默认 10 次请求预算内未找到 `golang.org/toolchain@v0.0.1-go1.27.4.linux-amd64` 的可信首次入库记录，按 fail-closed 策略返回 `needs_sync=false`。
     - 本次验证了托管环境下“可信索引证据不足时正确拒绝”，但创建签名 PR、`automerge.yml` 输出 `eligible=false` 以及 `main-review` 拦截仍待验收。
-  - **2026-11-27 状态**：#45（`594debc`，提交未签名、无审核记录，维护者手动合并）已把工具链升到 `1.27.4`，本项原定的 `1.26 → 1.27` 跨次版本路径无法再验收。sync 生成签名 PR 的路径要等下一个上游版本：`1.27.5` 属同次版本补丁（走自动合并判定），`1.28` 才是跨次版本。验收标准是否调整由维护者决定。
+  - **2026-11-27 状态**：#45（`594debc`，提交未签名、无审核记录，维护者手动合并）已把工具链升到 `1.27.4`，本项原定的 `1.26 → 1.27` 跨次版本路径无法再验收。sync 生成签名 PR 的路径要等下一个上游版本：`1.27.5` 属同次版本补丁（走自动合并判定），`1.28` 才是跨次版本。
+- [ ] 工具链同次版本补丁路径（等上游 `1.27.5`）：`go-toolchain-sync.yml` 生成签名 PR，提交显示 Verified，工具链与镜像冷却期满后由 `watchtower-automerge` 合入。该路径尚无托管实测。
 - [ ] 观察首批 Dependabot PR：低风险补丁/次版本在 `Pull Request` + `CodeQL` 全绿且冷却期满足后由 `watchtower-automerge` 合入；GitHub Actions PR 与安全更新 PR 被拦；同时核对 `/tools` 的 `tool` 依赖是否被 Dependabot 识别、`pip` PR 是否保持 `--hash` 格式（2.6 的遗留验证）。
   - **2026-11-26 状态**：
     - 已核实 Dependabot 识别 `/tools` 依赖并开启多条升级 PR（#17–#26、#28–#33 等）。
