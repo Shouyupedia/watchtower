@@ -23,7 +23,7 @@
 | M2 | 创建 `main-checks`、`main-review` Ruleset | PR 3 合入并跑过 | 维护者 | 已完成（2026-11-25） |
 | PR 4 | `automerge.yml`、`go-toolchain-sync.yml` 及其校验脚本 | M1、M2 | 实现者 | 已合并（#14）；真实样本已排除正文信号，正向自动合并待验收 |
 | PR 4b | macOS 发布目标（`darwin/amd64`、`darwin/arm64`），发布契约 6 → 8 个归档 | PR 4 | 实现者 | 已合并（#27，原 #15 合入堆叠分支后重提） |
-| PR 5 | `release.yml`、`scheduled-release.yml`、证明与 SBOM | PR 4b | 实现者 | 已合并（#34，原 #16 合入堆叠分支后重提）；首次正式发布 `v1.0.1` 已通过（`45937413435`），重复触发幂等性待验 |
+| PR 5 | `release.yml`、`scheduled-release.yml`、证明与 SBOM | PR 4b | 实现者 | 已合并（#34，原 #16 合入堆叠分支后重提）；首次正式发布 `v1.0.1`（`45937413435`）与重复触发幂等性（`45940072860`）均已通过 |
 | M3 | 端到端验收 | 全部 | 维护者 + 实现者 | 进行中 |
 
 ## 0.1 开始前需要你决定的 4 件事（有默认值，不回复则按默认）
@@ -304,12 +304,12 @@ go tool -modfile=tools/go.mod actionlint && zizmor --min-severity low .github/
 - [x] **5.3 `docker-publish.yml` 补全**：版本 tag 存在性检查（已存在则比对 `(tag, sha, digest)` 记录，不一致即失败）；SBOM；仅在串行锁内核实该 `tag` 是 `main` 上最高正式版本、版本镜像与证明就绪后才推进 `:latest`；禁用 Buildx 缓存。
 - [x] **5.4 `scheduled-release.yml`**：每周二 03:23 UTC + `workflow_dispatch`；判定、验证、打 tag、发布四段按设计稿 §5.2 实现；发布路径白名单判定（Go 源码、`go.mod`/`go.sum`、`tools/go.*`、`.go-version`、`dockerfiles/**`、`goreleaser.yml`、`.github/workflows/release.yml` 等，排除 `docs/**`、`*.md`、模板、CODEOWNERS）做成可测试的 Python 函数（`.github/scripts/release_paths.py` + 单元测试）。
 - [x] **5.5 README** 增加 `gh attestation verify` 校验说明（二进制与镜像）。
-- [ ] **5.6 彩排（必须）**：发布会推公开的 tag 与 `:latest`，一旦错了无法撤回（所有宿主机会自动拉取）。因此：
+- [x] **5.6 彩排（必须）**：发布会推公开的 tag 与 `:latest`，一旦错了无法撤回（所有宿主机会自动拉取）。因此：
   - 先在**一个临时私有副本仓库**或用 `workflow_dispatch` 的 dry-run 开关（不创建 tag、不推 GHCR，只跑到 snapshot 与 `docker build`）走通；
   - 真实首次发布用 `workflow_dispatch` 手动触发，并在 `main-checks` 已启用的状态下进行；
   - 首次发布版本应是 `v1.0.1`（`v1.0.0` 之后的第一个补丁）。
   - **2026-11-26 状态**：本地 GoReleaser snapshot（8 归档）与 4 架构 Linux Docker（`--no-push`）已在 #34 验证通过；`main` 上的 `scheduled-release.yml` 托管彩排（`dry_run=true`，run `45745244198`）已通过（`dry-run-docker` 2m8s、`dry-run-snapshot` 5m37s，`plan` / `ci` / `publish` 按预期 `skipped`）。最新正式版本仍为 `v1.0.0`；OIDC 签名、GHCR 推送、`:latest` 推进与发布幂等性留待维护者确认后的首次正式发布（`v1.0.1`，`dry_run=false`）验证。
-  - **2026-11-27 状态**：首次正式发布 `v1.0.1`（run `45937413435`，`1386a45`，`dry_run=false`）已通过，8 个归档、校验和、`release-record.json`、GHCR `1.0.1` / `latest` 与 `gh attestation verify` 均核验通过（详见 M3 记录）；仅剩“重复触发同一 tag 不产生任何变更（幂等）”待验证。
+  - **2026-11-27 状态**：首次正式发布 `v1.0.1`（run `45937413435`，`1386a45`，`dry_run=false`）已通过，8 个归档、校验和、`release-record.json`、GHCR `1.0.1` / `latest` 与 `gh attestation verify` 均核验通过（详见 M3 记录）。随后维护者再次触发 `scheduled-release.yml`（run `45940072860`，`1386a45`，`dry_run=false`）验证幂等性：`plan` 输出 `{"mode": "skip", "sha": "", "tag": ""}`，`dry-run-docker`、`dry-run-snapshot`、`ci`、`publish` 均 `skipped`，远端 tag 与 Release 无任何变更。
 
 **PR 5 验收**
 
