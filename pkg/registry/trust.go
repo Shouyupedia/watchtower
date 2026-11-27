@@ -7,11 +7,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/containrrr/watchtower/pkg/registry/helpers"
 	cliconfig "github.com/docker/cli/cli/config"
 	"github.com/docker/cli/cli/config/configfile"
 	"github.com/docker/cli/cli/config/credentials"
 	"github.com/docker/cli/cli/config/types"
+	"github.com/shouyupedia/watchtower/pkg/registry/helpers"
 	log "github.com/sirupsen/logrus"
 )
 

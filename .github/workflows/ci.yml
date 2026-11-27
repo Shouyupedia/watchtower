@@ -62,7 +62,7 @@ jobs:
           GOOS: darwin
         run: |
           set -euo pipefail
-          ldflags="-s -w -X github.com/containrrr/watchtower/internal/meta.Version=smoke-test"
+          ldflags="-s -w -X github.com/shouyupedia/watchtower/internal/meta.Version=smoke-test"
           mkdir -p "$RUNNER_TEMP/macos-smoke"
           GOARCH=arm64 go build -ldflags "$ldflags" -o "$RUNNER_TEMP/macos-smoke/watchtower-darwin-arm64" ./main.go
           GOARCH=amd64 go build -ldflags "$ldflags" -o "$RUNNER_TEMP/macos-smoke/watchtower-darwin-amd64" ./main.go

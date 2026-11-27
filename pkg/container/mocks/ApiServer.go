@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	t "github.com/containrrr/watchtower/pkg/types"
+	t "github.com/shouyupedia/watchtower/pkg/types"
 
 	dockerContainer "github.com/moby/moby/api/types/container"
 	dockerImage "github.com/moby/moby/api/types/image"

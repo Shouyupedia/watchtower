@@ -1,10 +1,16 @@
-## Acknowledgements
+## Origin & Acknowledgements
 
-This project is a fork of [Watchtower](https://github.com/containrrr/watchtower).
+This repository is an independently maintained project derived from the original [Watchtower](https://github.com/containrrr/watchtower) project (now archived).
+
+- **Original repository:** https://github.com/containrrr/watchtower
+- **Original documentation:** https://containrrr.dev/watchtower/
+- **License:** Continues to be distributed under the [Apache License 2.0](LICENSE.md), preserving all original copyright and attribution notices.
 
 **My utmost respect and deepest gratitude go to the original Watchtower project and all its maintainers and contributors.**
 
 Their outstanding work laid the foundation for this project. None of this would have been possible without their dedication and contributions.
+
+## Quick Start
 
 ```
 docker run -d \

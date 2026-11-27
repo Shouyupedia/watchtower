@@ -17,7 +17,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} \
     go build -o /out/watchtower \
-    -ldflags "-s -w -X github.com/containrrr/watchtower/internal/meta.Version=$WATCHTOWER_VERSION" .
+    -ldflags "-s -w -X github.com/shouyupedia/watchtower/internal/meta.Version=$WATCHTOWER_VERSION" .
 
 FROM scratch
 LABEL "com.centurylinklabs.watchtower"="true"

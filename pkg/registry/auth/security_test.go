@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/containrrr/watchtower/pkg/registry/auth"
 	ref "github.com/distribution/reference"
+	"github.com/shouyupedia/watchtower/pkg/registry/auth"
 )
 
 type tokenTransport func(*http.Request) (*http.Response, error)

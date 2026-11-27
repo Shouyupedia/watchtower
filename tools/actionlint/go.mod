@@ -1,4 +1,4 @@
-module github.com/containrrr/watchtower/tools/actionlint
+module github.com/shouyupedia/watchtower/tools/actionlint
 
 go 1.27.0
 

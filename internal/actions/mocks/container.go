@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containrrr/watchtower/pkg/container"
-	wt "github.com/containrrr/watchtower/pkg/types"
 	dockerContainer "github.com/moby/moby/api/types/container"
 	dockerImage "github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/network"
+	"github.com/shouyupedia/watchtower/pkg/container"
+	wt "github.com/shouyupedia/watchtower/pkg/types"
 )
 
 // CreateMockContainer creates a container substitute valid for testing

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	wt "github.com/containrrr/watchtower/pkg/types"
 	sdkClient "github.com/moby/moby/client"
+	wt "github.com/shouyupedia/watchtower/pkg/types"
 )
 
 func TestCreateConfigPreservesRunningUser(t *testing.T) {

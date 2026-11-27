@@ -14,7 +14,7 @@ WORKDIR /go/watchtower
 COPY . .
 
 RUN \
-  GO111MODULE=on CGO_ENABLED=0 GOOS=linux go build -a -ldflags "-extldflags '-static' -X github.com/containrrr/watchtower/internal/meta.Version=$(git describe --tags)" . && \
+  GO111MODULE=on CGO_ENABLED=0 GOOS=linux go build -a -ldflags "-extldflags '-static' -X github.com/shouyupedia/watchtower/internal/meta.Version=$(git describe --tags)" . && \
   GO111MODULE=on go test ./... -v
 
 
