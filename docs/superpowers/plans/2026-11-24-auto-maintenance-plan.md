@@ -224,6 +224,7 @@ git ls-remote ... # 每个 uses SHA 与版本 tag 逐一核对（可写成 scrip
 - [x] **4.2 实现冷却期查询**：
   - Go 模块：读 `https://index.golang.org/index?since=...` 查询模块版本首次入库 `Timestamp`；先**实测索引接口分页与按模块过滤能力**（它按时间排序、不支持按模块查询，需要评估扫描成本）。若无法在合理请求数内定位，则 fail-closed（`eligible=false`），并在 PR 描述中说明 Go 模块自动合并因此退化为人工审核，由你决定是否接受或另寻可信来源。**这是整个计划里最大的不确定点，先 spike 再继续。**
     - **4.2 实测结论（2026-11-25）**：`cooldown.go_first_seen` 仅将 `proxy.golang.org` 的 `.info` `Time` 作为前向扫描起点提示（`since = Time - 60s`），不将其当作可信发布时间；请求预算固定为 10 次（1 次 `.info` + 最多 9 页 `index.golang.org/index`，每页上限 2000 条）。实测样本中约 6/12 个 Go 模块命中，`golang.org/toolchain` 未在 10 次请求预算内命中。按 fail-closed 原则：未命中的 Go 模块升级 PR 判定 `eligible=false` 转人工审核；`go_toolchain_sync.py` 未命中时拒绝创建/更新工具链 PR（`needs_sync=False`），`automerge_verify.py` 亦判定 `eligible=false`（均未实现“首次观察起算”回退）。
+    - **4.2 改进（2026-11-27）**：未命中的原因是版本首次被代理抓取的时间远晚于提交时间，前向扫描 9 页（约 3 小时的索引量）够不到。`go_first_seen` 改为：前向扫描 2 页；未命中则用 `sum.golang.org/lookup` 的记录编号对索引时间二分，再带余量扫描收敛窗口；单次查询硬上限 40 次请求（`DEFAULT_MAX_REQUESTS`）。记录编号与 `.info` 时间一样只是定位提示，返回值仍只取自索引中的精确记录。线上实测 `pflag@v1.1.0` 28 次请求命中（`2026-11-06T08:28:21Z`），`golang.org/toolchain@v0.0.1-go1.27.4.linux-amd64` 27 次请求命中（`2026-11-10T17:09:23Z`），每次约 15–20 秒；旧逻辑能命中的样本仍为 2 次请求。用 #47 的基线与 head `go.mod` 重跑 `_validate_go_mod_change`：按 run `45829612597` 的时间通过，按入库后 3 天的时间以“未满 7 天”拒绝。
   - Docker：Docker Hub `https://hub.docker.com/v2/repositories/library/golang/tags/<tag>` 的 `tag_last_pushed`，并核对 digest 与 PR 中一致（缺失或不匹配时 fail-closed）。
   - PyPI：`https://pypi.org/pypi/<pkg>/<version>/json` 的 `upload_time_iso_8601`（覆盖锁文件中该包该版本允许的每一个 `--hash`，取对应文件的**最晚**上传时间；任一 hash 缺失或无时间戳即 fail-closed，与 4.1 保持一致）。
 - [x] **4.3 `automerge.yml`**：
@@ -322,7 +323,11 @@ python -I -m unittest discover -s .github/scripts -v
 ## M3：端到端验收（设计稿 §8 第 7、8 项）
 
 - [ ] 手动触发 `go-toolchain-sync.yml`：生成 `1.26 → 1.27` PR，提交显示 Verified，`automerge.yml` 输出 `eligible=false`，被 `main-review` 拦下；你 Approve 后合入。
-  - **2026-11-26 状态**：近期 `push` 到 `main` 的运行成功（如 `45743498035`），手动 `workflow_dispatch` 尚未执行。另需注意 4.2 记录的已知配置限制：`golang.org/toolchain` 在 `index.golang.org` 的 10 次请求预算内未命中时脚本会 fail-closed 返回 `needs_sync=False`，不创建 PR。
+  - **2026-11-26 核验**：
+    - #42 合入后的 [push 运行 45766579851](https://github.com/Shouyupedia/watchtower/actions/runs/45766579851) 在 `529ef31` 返回 `needs_sync=false`，原因是没有已打开的工具链 PR 可重放；`sync` 跳过。这条路径不检查新版本，不能替代手动验收。
+    - 手动触发的托管 [workflow_dispatch 运行 45767406129](https://github.com/Shouyupedia/watchtower/actions/runs/45767406129)（`529ef31`）已完成：`Check Go toolchain updates` 为 `success`，`Sync Go toolchain PR` 为 `skipped`，未创建 PR。脚本检测到当前 `1.26.11`、目标 `1.27.4`（`cross_minor: true`），但 `index.golang.org` 在默认 10 次请求预算内未找到 `golang.org/toolchain@v0.0.1-go1.27.4.linux-amd64` 的可信首次入库记录，按 fail-closed 策略返回 `needs_sync=false`。
+    - 本次验证了托管环境下“可信索引证据不足时正确拒绝”，但创建签名 PR、`automerge.yml` 输出 `eligible=false` 以及 `main-review` 拦截仍待验收。
+  - **2026-11-27 状态**：#45（`594debc`，提交未签名、无审核记录，维护者手动合并）已把工具链升到 `1.27.4`，本项原定的 `1.26 → 1.27` 跨次版本路径无法再验收。sync 生成签名 PR 的路径要等下一个上游版本：`1.27.5` 属同次版本补丁（走自动合并判定），`1.28` 才是跨次版本。验收标准是否调整由维护者决定。
 - [ ] 观察首批 Dependabot PR：低风险补丁/次版本在 `Pull Request` + `CodeQL` 全绿且冷却期满足后由 `watchtower-automerge` 合入；GitHub Actions PR 与安全更新 PR 被拦；同时核对 `/tools` 的 `tool` 依赖是否被 Dependabot 识别、`pip` PR 是否保持 `--hash` 格式（2.6 的遗留验证）。
   - **2026-11-26 状态**：
     - 已核实 Dependabot 识别 `/tools` 依赖并开启多条升级 PR（#17–#26、#28–#33 等）。
@@ -335,18 +340,25 @@ python -I -m unittest discover -s .github/scripts -v
       - 现有 10 个逐包 PR 的签名提交都不带 `dependency-group`。
       - 维护者确认 “Grouped security updates” 为关闭。
       - 据此实现并启用 `dependabot-group-v1`（已加入 `CALIBRATED_NORMAL_UPDATE_SIGNALS`，`dependabot-body-v1` 仍保持禁用），规则见设计稿 §3「拒绝安全更新」。离线回放中，#36 的签名数据命中该信号，#37 因元数据截断被拒；线上自动合并效果待下一个 Go 分组 PR 观察。
+    - **2026-11-27 核对（启用分组信号后的线上 PR）**：
+      - #47（`go-minor-patch`，head `b8c7334`，Dependabot 签名）是首个线上 Go 分组 PR。Automerge run `45829612597` 走到冷却期核验，因 `github.com/spf13/pflag@v1.1.0` 在 10 次请求内无可信首次可见记录输出 `eligible=false`；维护者批准后手动合并（`63f0ccc`）。4.2 的 2026-11-27 改进针对的就是这一拒绝原因。
+      - #50（`tools-minor-patch`，174 项）：run `45809263058` 与 `45828349834` 以 `go.mod changes a directive other than require` 拒绝，PR 把 `tools/go.mod` 的 `go 1.27.0` 改成了 `go 1.27.4`；维护者手动合并。
+      - run `45804242241` 输出 `go_modules update changes tools/actionlint/go.mod`：#46 拆出的 `tools/actionlint` 模块不在校验器允许的文件范围内。按时间对应 #48（当时同目录的 #49 也处于打开状态）；#48 由维护者手动合并。是否把该目录纳入允许范围待维护者决定。
+      - #39–#50 中已合并的 PR 均由维护者合并，尚无 PR 由 `watchtower-automerge` 合入。
 - [ ] 手动触发 `scheduled-release.yml`：固定 SHA → CI → tag → GoReleaser v2 → GHCR + 证明全链路通过。
   - **2026-11-26 状态**：`main` 上的 `dry_run=true` 托管彩排（run `45745244198`）已通过；待维护者确认后触发正式发布 `v1.0.1`（`dry_run=false`）验证全链路。
 - [ ] Actions 页确认 `go-toolchain-sync.yml` 与 `scheduled-release.yml` 为 `active`；把"60 天无活动会被停用"写进你的日历提醒（`scheduled-release` 本身不产生活动，合入频繁时自然续期，但无新提交时需要关注）。
   - **2026-11-26 已核实**：`gh workflow list --all` 确认 `Go Toolchain Sync` 与 `Scheduled release` 均为 `active`；日历提醒待维护者自行设置。
-- [ ] 负面验收：用一个测试 PR（改一行文档）确认**非机器人 PR 不会被自动合并**；用无 admin 权限的身份开 PR，确认无法绕过 `main-review`。
-  - **2026-11-26 已核实（前半项）**：PR #35（`b4b30c5`，仅改计划文档）在 `Pull Request`（run `45749026165`）与 `CodeQL`（run `45749025947`）全绿后触发 `Automerge`（run `45749585531`），`Verify automerge eligibility` 明确输出 `automerge verify: eligible=false: author Shouyupedia is not allowed`，`Merge verified pull request` 为 `skipped`，PR 保持 `OPEN`，随后由维护者手动合并（2026-11-26，合并提交 `ccd47f7`）。后半项（无 admin 权限身份无法绕过 `main-review`）待验收。
+- [x] 负面验收：验证**非机器人 PR 不会被自动合并**。**维护者于 2026-11-26 调整验收标准**：非管理员的 `main-review` 验收仅做只读配置和代码核查，不做账号实测。
+  - **2026-11-26 托管实测**：PR #35 的初始文档提交（`b4b30c5`）通过 `Pull Request`（run `45749026165`）与 `CodeQL`（run `45749025947`）后，自动合并任务（run `45749585531`）因 PR 作者不在允许列表而输出 `eligible=false`，合并任务跳过。#35 随后由维护者手动合并（`ccd47f7`）。
+  - **2026-11-26 逻辑核查（`main` 为 `529ef31`）**：GitHub API 显示 `main-review`（`28051631`）对默认分支生效，要求至少一项批准、代码所有者审核、由最后一次推送者之外的人批准，且推送后作废旧批准。仅 Repository admin 和 `watchtower-automerge` App 有 PR 审核豁免，普通写入者不在名单中。`main-checks`（`28051307`）无豁免，必需检查、分支须与基线同步的要求及 CodeQL 门禁对所有合并生效；合并方式仅允许 `merge`。
+  - `automerge` 和 `updater` environments 的部署分支策略均只允许分支 `main`，对应的 App 密钥仅在各自 environment 中配置，未在仓库级发现同名密钥。仓库 Actions 权限配置不允许 `GITHUB_TOKEN` 批准 PR（`can_approve_pull_request_reviews=false`）。自动合并工作流从默认分支运行，只读校验通过后才签发合并 App 令牌，并按已核验的 PR head SHA 发起合并。未发现普通写入者在这些已核查路径上绕过审批的入口；没有实测非管理员账号的界面或 API 拒绝结果。
 
 ## 风险与回滚
 
 | 风险 | 缓解 / 回滚 |
 | --- | --- |
-| Go 模块"首次公开可见时间"没有可行的可信来源（4.2） | 实测 `index.golang.org` 在 10 次请求预算下约命中 6/12 个 Go 模块且未命中 `golang.org/toolchain`；fail-closed 使未命中的依赖 PR 退化为人工审核、并阻止 `go-toolchain-sync.yml` 创建工具链 PR；其余生态不受影响；由你决定是否接受或另寻可信来源 |
+| Go 模块"首次公开可见时间"没有可行的可信来源（4.2） | PR 4 的 10 次前向扫描预算下约命中 6/12 个 Go 模块且未命中 `golang.org/toolchain`。2026-11-27 改为前向扫描加 `sum.golang.org` 记录编号二分（硬上限 40 次请求），`pflag@v1.1.0` 与 `go1.27.4` 样本命中。代价：新增对 `sum.golang.org` 可用性的依赖；需二分的模块每个约 15–20 秒，模块很多的分组 PR 可能触及校验任务的 10 分钟超时。两种情况都按 fail-closed 转人工审核；其余生态不受影响 |
 | 必需检查名变动导致 PR 永远等不到检查 | 检查名在 M2 之后冻结；变更需同时改 Ruleset，属维护者操作 |
 | `automerge.yml` 逻辑错误导致误合并 | PR 4 的拒绝用例全覆盖 + 离线回放；`main-checks` 零豁免兜底；紧急时在 `automerge` Environment 删除 App 私钥即停用 |
 | 发布了错误的 `:latest` | 彩排；`:latest` 只在串行锁内、产物齐全后推进；`v1.0.0` 与已发版本不会被覆盖，可用同一流程发下一补丁修复 |
