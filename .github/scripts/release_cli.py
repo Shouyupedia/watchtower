@@ -166,8 +166,10 @@ def archive_attestations(github: GitHub, candidate: Candidate, dist: Path) -> No
     _, record = require_record(github, candidate)
     subjects = []
     for name, digest in sorted(record.assets.items()):
-        attestations = github.api(f"attestations/sha256:{digest}?per_page=1")["attestations"]
-        if not attestations:
+        listed = github.api(
+            f"attestations/sha256:{digest}?per_page=1", missing_ok=True
+        )
+        if not listed or not listed.get("attestations"):
             subjects.append((dist / name).as_posix())
             continue
         verify_archive(github, dist / name, candidate.sha)

@@ -349,6 +349,7 @@ python -I -m unittest discover -s .github/scripts -v
 - [ ] 手动触发 `scheduled-release.yml`：固定 SHA → CI → tag → GoReleaser v2 → GHCR + 证明全链路通过。
   - **2026-11-26 状态**：`main` 上的 `dry_run=true` 托管彩排（run `45745244198`）已通过；待维护者确认后触发正式发布 `v1.0.1`（`dry_run=false`）验证全链路。
   - **2026-11-27 首次正式发布尝试**：维护者手动触发 run `45930402720`（`78fe0b0`，`dry_run=false`）。`plan`、发布前 CI 与 GoReleaser 构建通过，`publish / archives` 在 `stage-assets` 失败：`release_gh.save` 更新草稿日志时请求未带 tag 名，GitHub 把尚无 tag 的草稿改名为 `untagged-…`，脚本按“日志与 release 元数据不一致”中止。此时未创建 tag、未上传归档、未推送镜像，`:latest` 未变；留下草稿 release `460109181`（日志已记录 8 个归档哈希）。修复为 `save` 每次都带上 tag 名；dry-run 彩排不经过这条路径，所以此前没有暴露。重新触发前，该草稿由维护者决定改回 `v1.0.1` 或删除。
+  - **2026-11-27 第二次尝试**：草稿删除、#54 合入后，维护者触发 run `45933240985`（`777fa2a`，`dry_run=false`）。tag 名修复生效：`stage-assets` 通过，创建了带标记的 `v1.0.1` tag（指向 `777fa2a`），草稿 release `460127112` 上传了 10 个资产；随后 `archive-attestations` 失败——尚无证明的摘要查询 `attestations/sha256:<digest>` 时 GitHub 返回 404，而 `release_gh.api` 把 404 当作错误。镜像、`:latest` 与发布均未进行。修复：`release_gh.api` 新增 `missing_ok`，仅在该查询上把 404 视为“无证明”，归入待证明列表。
 - [ ] Actions 页确认 `go-toolchain-sync.yml` 与 `scheduled-release.yml` 为 `active`；把"60 天无活动会被停用"写进你的日历提醒（`scheduled-release` 本身不产生活动，合入频繁时自然续期，但无新提交时需要关注）。
   - **2026-11-26 已核实**：`gh workflow list --all` 确认 `Go Toolchain Sync` 与 `Scheduled release` 均为 `active`；日历提醒待维护者自行设置。
 - [x] 负面验收：验证**非机器人 PR 不会被自动合并**。**维护者于 2026-11-26 调整验收标准**：非管理员的 `main-review` 验收仅做只读配置和代码核查，不做账号实测。

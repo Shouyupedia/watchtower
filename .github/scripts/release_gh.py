@@ -41,7 +41,8 @@ class GitHub:
         self.repo = repo
         self.git_dir = git_dir
 
-    def api(self, path: str, *, pages: bool = False, method: str = "GET", data: dict | None = None):
+    def api(self, path: str, *, pages: bool = False, method: str = "GET", data: dict | None = None,
+            missing_ok: bool = False):
         command = ["gh", "api", f"repos/{self.repo}/{path}", "--method", method]
         if pages:
             command.extend(["--paginate", "--slurp"])
@@ -50,6 +51,10 @@ class GitHub:
         result = subprocess.run(command, input=json.dumps(data) if data is not None else None,
                                 encoding="utf-8", capture_output=True, check=False)
         if result.returncode:
+            # The attestation list endpoint answers 404, not an empty list,
+            # when the digest has no attestations yet.
+            if missing_ok and "HTTP 404" in result.stderr:
+                return None
             raise ReleaseError(f"GitHub {method} {path} failed: {result.stderr.strip()}")
         payload = json.loads(result.stdout)
         return [item for page in payload for item in page] if pages else payload
