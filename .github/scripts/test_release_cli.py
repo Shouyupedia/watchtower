@@ -10,6 +10,7 @@ import io
 import json
 import os
 import sys
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -23,6 +24,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import release_cli
+import release_gh
 import release_image
 from release_gh import GitHub, Release
 from release_paths import has_release_changes
@@ -523,7 +525,7 @@ class ReleaseCliTest(unittest.TestCase):
         attested_name = ARCHIVES[0]
         attested_digest = record.assets[attested_name]
 
-        def fake_api(path: str) -> dict:
+        def fake_api(path: str, **kwargs) -> dict:
             if path == f"attestations/sha256:{attested_digest}?per_page=1":
                 return {"attestations": [{}]}
             return {"attestations": []}
@@ -570,6 +572,35 @@ class ReleaseCliTest(unittest.TestCase):
             self.assertIn("subjects<<END_SUBJECTS\n", written)
             self.assertNotIn((dist / attested_name).as_posix(), written)
             self.assertEqual(gh.calls, [])
+
+    def test_api_missing_ok_only_absorbs_404(self) -> None:
+        github = GitHub("owner/watchtower", self.tmp)
+        not_found = subprocess.CompletedProcess([], 1, "", "gh: Not Found (HTTP 404)\n")
+        forbidden = subprocess.CompletedProcess([], 1, "", "gh: Forbidden (HTTP 403)\n")
+        with mock.patch.object(release_gh.subprocess, "run", return_value=not_found):
+            self.assertIsNone(github.api("attestations/sha256:abc", missing_ok=True))
+            with self.assertRaises(ReleaseError):
+                github.api("attestations/sha256:abc")
+        with mock.patch.object(release_gh.subprocess, "run", return_value=forbidden):
+            with self.assertRaisesRegex(ReleaseError, "HTTP 403"):
+                github.api("attestations/sha256:abc", missing_ok=True)
+
+    def test_archive_attestations_attests_subjects_the_api_reports_as_missing(self) -> None:
+        dist = make_dist(self.tmp, "v1.0.1")
+        record = Record("v1.0.1", SHA_NEXT, True).with_assets(dist)
+        draft = Release(82, "v1.0.1", True, "Watchtower v1.0.1", record)
+        gh = FakeGitHub(head=SHA_NEXT, tags=self._base_tags(), releases={"v1.0.1": draft})
+        out_file = self.tmp / "archive_missing.out"
+        env = {"GITHUB_OUTPUT": str(out_file)}
+        # GitHub answers 404 (no list) for digests without attestations.
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch.object(gh, "api", create=True, return_value=None),
+        ):
+            release_cli.archive_attestations(gh, Candidate("recover", "v1.0.1", SHA_NEXT), dist)
+        written = out_file.read_text(encoding="utf-8")
+        for name in record.assets:
+            self.assertIn((dist / name).as_posix(), written)
 
     def test_image_attestation_verification_binds_to_candidate_sha(self) -> None:
         dist = make_dist(self.tmp, "v1.0.1")
