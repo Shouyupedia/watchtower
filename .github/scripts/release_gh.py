@@ -124,7 +124,9 @@ class GitHub:
         return Release.from_api(self.api("releases", method="POST", data=payload))
 
     def save(self, release: Release, record: Record, *, publish: bool = False, latest: bool = False) -> Release:
-        payload = {"body": record.body(release.notes)}
+        # Always resend the tag name: GitHub renames a draft whose tag does not
+        # exist yet to "untagged-..." when an update omits it.
+        payload = {"tag_name": record.tag, "body": record.body(release.notes)}
         if publish:
             payload.update(draft=False, make_latest=str(latest).lower())
         return Release.from_api(self.api(f"releases/{release.id}", method="PATCH", data=payload))
