@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import bisect
 import json
 import sys
 import unittest
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -42,6 +44,77 @@ def _ndjson(entries: list[dict[str, str]]) -> bytes:
 
 def _json_bytes(obj: object) -> bytes:
     return json.dumps(obj).encode("utf-8")
+
+
+class FakeGoServices:
+    """Synthetic proxy, index and checksum database over one record list.
+
+    The index holds one filler entry every 30 seconds for 20 days, so a
+    forward scan from the hint cannot reach a record that lands days later.
+    Checksum-database ids follow index order unless ``record_id`` overrides it.
+    """
+
+    BASE = datetime(2026, 11, 1, 0, 0, 0, tzinfo=timezone.utc)
+    NOW = BASE + timedelta(days=20)
+    MODULE = "example.com/mod"
+    VERSION = "v1.2.4"
+    TARGET_TIME = BASE + timedelta(days=12, hours=3, seconds=17, microseconds=500000)
+
+    def __init__(self, *, in_index=True, record_id=None, resolvable=None) -> None:
+        records = [
+            (f"example.com/filler{i}", "v0.0.1", self.BASE + timedelta(seconds=30 * i))
+            for i in range(20 * 24 * 120)
+        ]
+        if in_index:
+            records.append((self.MODULE, self.VERSION, self.TARGET_TIME))
+        records.sort(key=lambda record: record[2])
+        self._records = records
+        self._times = [record[2] for record in records]
+        self._position = {record[:2]: i for i, record in enumerate(records)}
+        self._position.setdefault((self.MODULE, self.VERSION), len(records) // 2)
+        self._record_id = record_id or (lambda position: position)
+        self._resolvable = resolvable or (lambda module, position: True)
+        self.calls: list[str] = []
+
+    def __call__(self, url: str) -> bytes:
+        self.calls.append(url)
+        parts = urllib.parse.urlsplit(url)
+        if parts.netloc == "proxy.golang.org":
+            hint = self.BASE + timedelta(hours=1)
+            return _json_bytes(
+                {"Version": self.VERSION, "Time": hint.strftime("%Y-%m-%dT%H:%M:%SZ")}
+            )
+        if parts.netloc == "index.golang.org":
+            query = urllib.parse.parse_qs(parts.query)
+            since = datetime.fromisoformat(query["since"][0].replace("Z", "+00:00"))
+            start = bisect.bisect_left(self._times, since)
+            rows = self._records[start : start + int(query["limit"][0])]
+            return _ndjson(
+                [
+                    {
+                        "Path": path,
+                        "Version": version,
+                        "Timestamp": moment.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+                    }
+                    for path, version, moment in rows
+                ]
+            )
+        if parts.netloc == "sum.golang.org":
+            module, version = parts.path[len("/lookup/") :].rsplit("@", 1)
+            position = self._position.get((module, version))
+            if position is None or not self._resolvable(module, position):
+                raise cooldown.CooldownError(f"HTTP 404 while fetching {url}")
+            return (
+                f"{self._record_id(position)}\n"
+                f"{module} {version} h1:AAAA=\n"
+                f"{module} {version}/go.mod h1:BBBB=\n"
+            ).encode("utf-8")
+        raise AssertionError(f"unexpected HTTP URL: {url}")
+
+    def lookup(self, **kwargs: object) -> datetime:
+        return cooldown.go_first_seen(
+            self.MODULE, self.VERSION, http_get=self, now=self.NOW, **kwargs  # type: ignore[arg-type]
+        )
 
 
 class IsAgedTests(unittest.TestCase):
@@ -267,6 +340,61 @@ class GoFirstSeenTests(unittest.TestCase):
         with self.assertRaises(cooldown.CooldownError):
             cooldown.go_first_seen(
                 "example.com/mod", "v1.0.0", http_get=http_get, max_requests=True  # type: ignore[arg-type]
+            )
+
+
+class GoFirstSeenBisectTests(unittest.TestCase):
+    def test_bisects_to_index_record_far_after_hint(self) -> None:
+        services = FakeGoServices()
+        self.assertEqual(services.lookup(), FakeGoServices.TARGET_TIME)
+        self.assertTrue(any("sum.golang.org" in url for url in services.calls))
+        self.assertLessEqual(len(services.calls), cooldown.DEFAULT_MAX_REQUESTS)
+
+    def test_skips_probe_rows_the_checksum_database_cannot_resolve(self) -> None:
+        services = FakeGoServices(
+            resolvable=lambda module, position: "filler" not in module or position % 2 == 1
+        )
+        self.assertEqual(services.lookup(), FakeGoServices.TARGET_TIME)
+
+    def test_fails_closed_when_checksum_ids_mislead(self) -> None:
+        # Reversed ids steer the bisection away from the record; the lookup
+        # must miss rather than return some other timestamp.
+        services = FakeGoServices(record_id=lambda position: 10**6 - position)
+        with self.assertRaises(cooldown.CooldownError):
+            services.lookup()
+
+    def test_fails_closed_when_record_is_only_in_checksum_database(self) -> None:
+        services = FakeGoServices(in_index=False)
+        with self.assertRaises(cooldown.CooldownError):
+            services.lookup()
+
+    def test_fails_closed_without_checksum_record_for_target(self) -> None:
+        services = FakeGoServices(
+            resolvable=lambda module, position: module != FakeGoServices.MODULE
+        )
+        with self.assertRaises(cooldown.CooldownError):
+            services.lookup()
+
+    def test_fails_closed_when_no_probe_row_resolves(self) -> None:
+        services = FakeGoServices(
+            resolvable=lambda module, position: module == FakeGoServices.MODULE
+        )
+        with self.assertRaises(cooldown.CooldownError):
+            services.lookup()
+
+    def test_request_budget_is_a_hard_cap(self) -> None:
+        services = FakeGoServices()
+        with self.assertRaises(cooldown.CooldownError):
+            services.lookup(max_requests=10)
+        self.assertEqual(len(services.calls), 10)
+
+    def test_rejects_naive_now(self) -> None:
+        with self.assertRaises(cooldown.CooldownError):
+            cooldown.go_first_seen(
+                "example.com/mod",
+                "v1.2.4",
+                http_get=StrictFakeHttp({}),
+                now=datetime(2026, 11, 21),
             )
 
 
